@@ -595,6 +595,14 @@
                     this.userStatus = res.status || 'NOT_STARTED';
                     this.roundsMap = res.rounds_map || {};
 
+                    // Debug logging
+                    console.log('📊 State Updated:', {
+                        userMaxLevel: this.userMaxLevel,
+                        userStatus: this.userStatus,
+                        roundsMap: this.roundsMap,
+                        globalLevel: res.global_level
+                    });
+
                     // Update solved questions
                     if (res.solved_ids) {
                         this.solvedQuestions = new Set(res.solved_ids.map(String));
@@ -657,27 +665,55 @@
 
             resolveLevelStatus(level) {
                 // Safety check
-                if (!this.roundsMap) return 'LOCKED';
-
-                // 1. Check Global Round Status
-                const globalStatus = (this.roundsMap[level] || 'LOCKED').toUpperCase();
-
-                if (globalStatus === 'LOCKED' || globalStatus === 'PENDING') return 'LOCKED';
-                if (globalStatus === 'PAUSED') return 'PAUSED';
-
-                // 2. User Progress Check
-                if (level < this.userMaxLevel) {
-                    return 'COMPLETED';
+                if (!this.roundsMap || Object.keys(this.roundsMap).length === 0) {
+                    console.warn('roundsMap is empty, defaulting Level 1 to ACTIVE');
+                    // If no rounds data, show Level 1 as ACTIVE by default
+                    return level === 1 ? 'ACTIVE' : 'LOCKED';
                 }
 
-                if (level === this.userMaxLevel) {
-                    // If user completed this level?
-                    if (this.userStatus === 'COMPLETED') return 'COMPLETED';
-                    // If user is currently playing this level or it's next up
-                    return 'ACTIVE';
+                // 1. Check Global Round Status from backend
+                const globalStatus = this.roundsMap[level];
+
+                if (!globalStatus) {
+                    // Round doesn't exist in database yet
+                    return 'LOCKED';
                 }
 
-                // level > userMaxLevel
+                const statusUpper = globalStatus.toUpperCase();
+
+                // If admin has paused this level
+                if (statusUpper === 'PAUSED') return 'PAUSED';
+
+                // If admin hasn't activated this level yet
+                if (statusUpper === 'PENDING' || statusUpper === 'LOCKED') return 'LOCKED';
+
+                // If admin has completed this level
+                if (statusUpper === 'COMPLETED') return 'COMPLETED';
+
+                // 2. Level is ACTIVE from admin side, now check user progress
+                if (statusUpper === 'ACTIVE') {
+                    // User hasn't reached this level yet
+                    if (level > this.userMaxLevel) {
+                        return 'LOCKED';
+                    }
+
+                    // User has completed this level
+                    if (level < this.userMaxLevel) {
+                        return 'COMPLETED';
+                    }
+
+                    // This is the user's current level
+                    if (level === this.userMaxLevel) {
+                        // Check if user completed it
+                        if (this.userStatus === 'COMPLETED') {
+                            return 'COMPLETED';
+                        }
+                        // User is currently on this level
+                        return 'ACTIVE';
+                    }
+                }
+
+                // Default fallback
                 return 'LOCKED';
             },
 
