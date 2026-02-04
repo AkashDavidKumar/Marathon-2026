@@ -55,7 +55,15 @@ jobs:
           
           # Verify Health
           echo "Verifying service health..."
-          sleep 5
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
           if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
               echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
               sudo supervisorctl status debug-marathon
@@ -96,7 +104,15 @@ jobs:
           
           # Verify Health
           echo "Verifying service health..."
-          sleep 5
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
           if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
               echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
               sudo supervisorctl status debug-marathon
@@ -136,7 +152,15 @@ jobs:
           
           # Verify Health
           echo "Verifying service health..."
-          sleep 5
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
           if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
               echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
               sudo supervisorctl status debug-marathon
@@ -176,7 +200,15 @@ jobs:
           
           # Verify Health
           echo "Verifying service health..."
-          sleep 5
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
           if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
               echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
               sudo supervisorctl status debug-marathon
