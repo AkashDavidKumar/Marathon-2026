@@ -19,6 +19,7 @@ jobs:
         cp -r backend deploy_package/
         cp -r frontend deploy_package/
         cp nginx-optimized.conf deploy_package/
+        cp supervisor-real.conf deploy_package/
         # Create tarball preserving permissions
         tar -czf app.tar.gz -C deploy_package .
         echo "Package created: $(du -h app.tar.gz | cut -f1)"
@@ -54,8 +55,15 @@ jobs:
           # Fix: script is in current dir (/opt/debug-marathon/backend)
           sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
 
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
           # Restart services
           sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
@@ -109,7 +117,15 @@ jobs:
           # Initialize Database (Self-healing)
           echo "Run DB Setup..."
           sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
+          
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
           sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
@@ -162,7 +178,15 @@ jobs:
           # Initialize Database (Self-healing)
           echo "Run DB Setup..."
           sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
+          
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
           sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
@@ -215,7 +239,15 @@ jobs:
           # Initialize Database (Self-healing)
           echo "Run DB Setup..."
           sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
+          
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
           sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
