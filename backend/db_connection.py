@@ -136,9 +136,31 @@ class MySQLManager:
 
     def execute_query(self, query, params=None):
         conn = self.get_connection()
-        if not conn: return None
+        if not conn: 
+            # FLICKER FIX: If connection fails, try to serve strict cache from memory if available
+            # This prevents UI going blank during brief DB blips.
+            # Assuming self._query_cache exists (we will initialize it)
+            if hasattr(self, '_query_cache'):
+                cache_key = f"{query}:{str(params)}"
+                if cache_key in self._query_cache:
+                    logger.warning(f"DB Connection failed, serving cached data for: {query[:50]}...")
+                    return self._query_cache[cache_key]['data']
+            return None
         
-        # --- Simple Caching Check ---
+        # --- Simple Caching ---
+        # Initialize cache if not present
+        if not hasattr(self, '_query_cache'):
+             self._query_cache = {}
+
+        cache_key = f"{query}:{str(params)}"
+        import time
+        now = time.time()
+        
+        # Serve from cache if fresh (< 2 seconds) to reduce heavy load and flicker
+        if cache_key in self._query_cache:
+            entry = self._query_cache[cache_key]
+            if now - entry['time'] < 2.0: # 2 second cache duration
+                return entry['data']
         # Only cache simple SELECTs without user-specific params if needed, 
         # but for now, let's keep it safe and just execute.
         # To add simple caching:
@@ -154,6 +176,11 @@ class MySQLManager:
             dur = (time.time() - start_t) * 1000
             if dur > 100:
                 logger.warning(f"⚠️ SLOW QUERY ({dur:.2f}ms): {query[:200]}...")
+            
+            # Save to cache
+            if hasattr(self, '_query_cache'):
+                self._query_cache[cache_key] = {'data': result, 'time': time.time()}
+                
             return result
         except Error as e:
             logger.error(f"SELECT Query failed: {e}\nQuery: {query}")
