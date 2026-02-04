@@ -1032,24 +1032,38 @@
             },
 
             async runCode() {
-                if (!this.throttleAction('btn-run', 5000)) return;
+                if (this.isThrottled) return;
                 const q = this.questions[this.currentQId];
-                if (!q) return;
+                if (!q) {
+                    document.getElementById('console-output').innerHTML = '<div class="error-msg">Error: Current question context invalid. Refresh page.</div>';
+                    return;
+                }
+
+                if (!this.throttleAction('btn-run', 5000)) return;
+
+                console.log("Running Code for Q:", q.id, "Title:", q.title);
+                const code = CodeEditor.editor.getValue();
                 const outDiv = document.getElementById('console-output');
                 outDiv.innerHTML = '<div class="running">Running test cases...</div>';
+
                 try {
                     const res = await API.request('/contest/run', 'POST', {
-                        code: CodeEditor.editor.getValue(), language: this.allowedLanguage,
-                        question_id: q.id, user_id: this.user.participant_id,
+                        code: code, language: this.allowedLanguage,
+                        question_id: Number(q.id) || q.id,
+                        user_id: this.user.participant_id,
                         contest_id: this.activeContestId, level: this.currentLevel
                     });
+
                     if (res && res.test_results) {
                         this.renderTestResults(res.test_results, false, res.warnings);
-                        if (document.getElementById('exec-time')) document.getElementById('exec-time').innerText = res.execution_time || "Done";
+                        const execTime = document.getElementById('exec-time');
+                        if (execTime) execTime.innerText = res.execution_time || "Done";
                     } else {
-                        outDiv.innerHTML = `<div class="error-msg">${res.error || 'Execution Error'}</div>`;
+                        // Handle specific backend error "Question not found" gracefully?
+                        // If res.error exists, show it.
+                        outDiv.innerHTML = `<div class="error-msg">${res.error || 'Execution Error: Unknown Backend Response'}</div>`;
                     }
-                } catch (e) { outDiv.innerHTML = `<div class="error-msg">Connection Error</div>`; }
+                } catch (e) { outDiv.innerHTML = `<div class="error-msg">Connection Error: ${e.message}</div>`; }
             },
 
             async performSubmit(returnRes = false, suppressModal = false) {
@@ -1093,27 +1107,40 @@
 
             async submitLevel() {
                 try {
+                    // Check if all questions are solved?
+                    // Verify locally first
+                    if (this.solvedQuestions.size < this.questions.length) {
+                        // Although prompt says "partial scores must be finalized", usually Master Submit implies "I am done".
+                        // We will allow it but warn? Or just proceed.
+                        // "Master Submit must finalize the level attempt... persist... score"
+                    }
+
                     const btn = document.getElementById('btn-submit');
                     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Finalizing...'; }
+
                     const res = await API.request('/contest/submit-level', 'POST', {
                         user_id: this.user.participant_id,
                         contest_id: this.activeContestId,
                         level: this.currentLevel
                     });
+
                     if (res.success) {
-                        Modal.show("Level Completed!", "Your score has been recorded.", () => {
+                        Modal.show("Level Completed!", "Your score has been recorded. Returning to level selection.", () => {
                             this.showView('selection');
                             this.fetchAndApplyState();
                         }, 'info');
                     } else {
-                        Toast.show("Error: " + res.message, "error");
+                        Toast.show("Error finalizing level: " + res.message, "error");
                         if (btn) btn.disabled = false;
                     }
                 } catch (e) {
-                    Toast.show("Network Error", "error");
-                    if (document.getElementById('btn-submit')) document.getElementById('btn-submit').disabled = false;
+                    console.error(e);
+                    Toast.show("Network Error during finalization", "error");
+                    const btn = document.getElementById('btn-submit');
+                    if (btn) btn.disabled = false;
                 }
             },
+
         };
     </script>
 </body>
