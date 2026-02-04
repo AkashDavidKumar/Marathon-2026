@@ -93,6 +93,17 @@ Resources:
         - Key: Name
           Value: debug-marathon-public-2
 
+  PublicSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.5.0/24
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: debug-marathon-public-3
+
   PublicSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -103,6 +114,12 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet3RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet3
       RouteTableId: !Ref PublicRouteTable
 
   # Private Subnets & NAT (Optional usage, but kept for DB isolation)
@@ -125,6 +142,16 @@ Resources:
       Tags:
         - Key: Name
           Value: debug-marathon-private-2
+
+  PrivateSubnet3:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.6.0/24
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: debug-marathon-private-3
 
   # Security Groups
   LoadBalancerSecurityGroup:
@@ -184,24 +211,47 @@ Resources:
       SubnetIds:
         - !Ref PrivateSubnet1
         - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
 
   Database:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
     Properties:
       DBInstanceIdentifier: debug-marathon-db
-      DBInstanceClass: db.t3.micro
+      DBInstanceClass: db.m5.large
       Engine: mysql
       MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
-      AllocatedStorage: 20
+      AllocatedStorage: 100
       DBName: debug_marathon_v3
       VPCSecurityGroups:
         - !Ref DatabaseSecurityGroup
       DBSubnetGroupName: !Ref DatabaseSubnetGroup
-      MultiAZ: false
+      MultiAZ: true
       PubliclyAccessible: false
-      StorageType: gp2
+      StorageType: gp3
+      Iops: 3000
+      StorageThroughput: 125
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
+      MaxAllocatedStorage: 200
+
+  # RDS Monitoring Role
+  RDSMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+      Path: /
 
   # Instance Role
   EC2Role:
@@ -236,11 +286,14 @@ Resources:
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
+        - !Ref PublicSubnet3
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
-          Value: '60'
+          Value: "60"
         - Key: routing.http2.enabled
-          Value: 'true'
+          Value: "true"
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: "true"
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -256,7 +309,7 @@ Resources:
       UnhealthyThresholdCount: 5
       TargetType: instance
       Matcher:
-        HttpCode: '200'
+        HttpCode: "200"
 
   LoadBalancerListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -274,20 +327,22 @@ Resources:
     Properties:
       LaunchTemplateName: debug-marathon-template
       LaunchTemplateData:
-        ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
-        InstanceType: t3.small
+        ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
+        InstanceType: m5.large
         KeyName: !Ref KeyPairName
         SecurityGroupIds:
           - !Ref WebServerSecurityGroup
         IamInstanceProfile:
           Arn: !GetAtt EC2InstanceProfile.Arn
+        Monitoring:
+          Enabled: true
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -e
             exec > >(tee /var/log/user-data.log) 2>&1
             echo "Starting Setup..."
-            
+
             # 1. Install Deps
             yum update -y
             yum install -y nginx python3-pip unzip aws-cli jq
@@ -310,7 +365,7 @@ Resources:
             import mysql.connector.pooling
             from dotenv import load_dotenv
             load_dotenv()
-            
+
             logging.basicConfig(level=logging.INFO)
             logger = logging.getLogger("DB")
 
@@ -329,6 +384,9 @@ Resources:
                             pool_name=f"pool_{self.pid}",
                             pool_size=20,
                             pool_reset_session=True,
+                            connection_timeout=10,
+                            use_pure=False,
+                            autocommit=False,
                             host=os.getenv('DB_HOST'),
                             user=os.getenv('DB_USER'),
                             password=os.getenv('DB_PASSWORD'),
@@ -421,16 +479,21 @@ Resources:
       LaunchTemplate:
         LaunchTemplateId: !Ref LaunchTemplate
         Version: !GetAtt LaunchTemplate.LatestVersionNumber
-      MinSize: 2
-      MaxSize: 6
-      DesiredCapacity: 2
+      MinSize: 3
+      MaxSize: 9
+      DesiredCapacity: 3
       VPCZoneIdentifier:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
+        - !Ref PublicSubnet3
       TargetGroupARNs:
         - !Ref TargetGroup
       HealthCheckType: ELB
       HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: debug-marathon-instance
+          PropagateAtLaunch: true
 
   ScaleUpPolicy:
     Type: AWS::AutoScaling::ScalingPolicy
@@ -442,7 +505,155 @@ Resources:
           PredefinedMetricType: ASGAverageCPUUtilization
         TargetValue: 40.0
 
+  # CloudWatch Alarms for Performance Monitoring
+  RDSHighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-rds-high-cpu
+      AlarmDescription: Alert when RDS CPU exceeds 80%
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  RDSLowStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-rds-low-storage
+      AlarmDescription: Alert when RDS free storage is below 10GB
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10000000000
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  RDSHighConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-rds-high-connections
+      AlarmDescription: Alert when RDS database connections exceed 80
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  RDSReadLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-rds-read-latency
+      AlarmDescription: Alert when RDS read latency exceeds 50ms
+      MetricName: ReadLatency
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0.05
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  RDSWriteLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-rds-write-latency
+      AlarmDescription: Alert when RDS write latency exceeds 50ms
+      MetricName: WriteLatency
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0.05
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref Database
+
+  ALBUnhealthyHostAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-alb-unhealthy-hosts
+      AlarmDescription: Alert when unhealthy host count is greater than 0
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+
+  ALBTargetResponseTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-alb-high-response-time
+      AlarmDescription: Alert when target response time exceeds 2 seconds
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+
+  ALB5XXErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: debug-marathon-alb-5xx-errors
+      AlarmDescription: Alert when 5XX error count exceeds 10
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt LoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt TargetGroup.TargetGroupFullName
+      TreatMissingData: notBreaching
+
 Outputs:
   LoadBalancerURL:
     Description: Load Balancer URL
     Value: !Sub "http://${LoadBalancer.DNSName}"
+
+  DatabaseEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt Database.Endpoint.Address
+
+  DatabasePort:
+    Description: RDS Database Port
+    Value: !GetAtt Database.Endpoint.Port
+
+  AutoScalingGroupName:
+    Description: Auto Scaling Group Name
+    Value: !Ref AutoScalingGroup
