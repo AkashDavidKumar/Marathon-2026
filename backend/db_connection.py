@@ -85,20 +85,24 @@ class MySQLManager:
                 full_config['database'] = target_db
                 self.pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name=f"debug_marathon_pool_{self.pid}",
-                    pool_size=5, # EMERGENCY FIX: Reduced to 5 to prevent exhaustion
+                    pool_size=20, # Optimized for m5.large with better RDS performance
                     pool_reset_session=True,
-                    connection_timeout=30, # Reduced to 30s
+                    connection_timeout=10, # Reduced for faster failover in Multi-AZ
+                    autocommit=False,
+                    use_pure=False, # Use C extension for better performance
                     **full_config
                 )
-                logger.info(f"Connection pool initialized with database '{target_db}' for PID {self.pid}.")
+                logger.info(f"Connection pool initialized with database '{target_db}' for PID {self.pid}. Pool size: 20")
             except Error as e:
                 if e.errno == 1049: # Unknown database
                     logger.warning(f"Database '{target_db}' not found. Connecting to server only.")
                     base_config.pop('database', None)
                     self.pool = mysql.connector.pooling.MySQLConnectionPool(
                         pool_name=f"debug_marathon_pool_{self.pid}",
-                        pool_size=5, # EMERGENCY FIX: Reduced to 5
+                        pool_size=20, # Optimized pool size
                         pool_reset_session=True,
+                        connection_timeout=10,
+                        use_pure=False,
                         **base_config
                     )
                 else:
