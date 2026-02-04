@@ -752,6 +752,83 @@ const Admin = {
         }
     },
 
+    // ================= PENDING ADMINS =================
+    async loadPendingAdminsView() {
+        try {
+            const data = await API.request('/auth/admin/pending');
+            const pendingAdmins = data.pending || [];
+
+            const html = `
+                <div class="admin-header">
+                    <h1>Pending Admin Approvals</h1>
+                    <p style="color: var(--text-secondary);">Review and approve new admin registrations</p>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-sm" style="background: white; border-radius: 8px; padding: 1.5rem;">
+                    ${pendingAdmins.length > 0 ? `
+                        <table class="admin-table">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Full Name</th>
+                                    <th>Registered At</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${pendingAdmins.map(admin => `
+                                <tr>
+                                    <td>${admin.username}</td>
+                                    <td>${admin.full_name || 'N/A'}</td>
+                                    <td>${new Date(admin.created_at).toLocaleString()}</td>
+                                    <td><span class="badge badge-warning">PENDING</span></td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary" onclick="Admin.approveAdmin(${admin.user_id}, 'APPROVE')" style="margin-right: 0.5rem;">
+                                            <i class="fa-solid fa-check"></i> Approve
+                                        </button>
+                                        <button class="btn btn-sm btn-secondary" onclick="Admin.approveAdmin(${admin.user_id}, 'REJECT')" style="background-color:#fee2e2; color:#b91c1c; border:none;">
+                                            <i class="fa-solid fa-times"></i> Reject
+                                        </button>
+                                    </td>
+                                </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    ` : `
+                        <div style="text-align: center; padding: 3rem; color: var(--text-secondary);">
+                            <i class="fa-solid fa-user-check" style="font-size: 3rem; margin-bottom: 1rem; color: var(--gray-300);"></i>
+                            <h3>No Pending Approvals</h3>
+                            <p>All admin registrations have been processed.</p>
+                        </div>
+                    `}
+                </div>
+            `;
+            document.querySelector('.admin-main').innerHTML = html;
+        } catch (e) {
+            document.querySelector('.admin-main').innerHTML = `<h2 style="color:red">Error loading pending admins: ${e.message}</h2>`;
+        }
+    },
+
+    async approveAdmin(userId, action) {
+        const actionText = action === 'APPROVE' ? 'approve' : 'reject';
+        if (!confirm(`Are you sure you want to ${actionText} this admin registration?`)) return;
+
+        try {
+            const res = await API.request('/auth/admin/approve', 'POST', {
+                user_id: userId,
+                action: action
+            });
+
+            if (res.success) {
+                this.showNotification(`Admin ${actionText}d successfully`, 'success');
+                this.loadPendingAdminsView(); // Refresh the list
+            }
+        } catch (e) {
+            alert(`Failed to ${actionText} admin: ` + e.message);
+        }
+    },
+
     // ================= NEW LEVEL CONTROLS =================
     async activateLevel(level) {
         if (!confirm(`Set Level ${level} as ACTIVE? This will enable it for participants.`)) return;
