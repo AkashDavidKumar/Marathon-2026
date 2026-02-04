@@ -664,56 +664,14 @@
             },
 
             resolveLevelStatus(level) {
-                // Safety check
-                if (!this.roundsMap || Object.keys(this.roundsMap).length === 0) {
-                    console.warn('roundsMap is empty, defaulting Level 1 to ACTIVE');
-                    // If no rounds data, show Level 1 as ACTIVE by default
-                    return level === 1 ? 'ACTIVE' : 'LOCKED';
-                }
-
-                // 1. Check Global Round Status from backend
-                const globalStatus = this.roundsMap[level];
-
-                if (!globalStatus) {
-                    // Round doesn't exist in database yet
-                    return 'LOCKED';
-                }
-
-                const statusUpper = globalStatus.toUpperCase();
-
-                // If admin has paused this level
-                if (statusUpper === 'PAUSED') return 'PAUSED';
-
-                // If admin hasn't activated this level yet
-                if (statusUpper === 'PENDING' || statusUpper === 'LOCKED') return 'LOCKED';
-
-                // If admin has completed this level
-                if (statusUpper === 'COMPLETED') return 'COMPLETED';
-
-                // 2. Level is ACTIVE from admin side, now check user progress
-                if (statusUpper === 'ACTIVE') {
-                    // User hasn't reached this level yet
-                    if (level > this.userMaxLevel) {
-                        return 'LOCKED';
-                    }
-
-                    // User has completed this level
-                    if (level < this.userMaxLevel) {
-                        return 'COMPLETED';
-                    }
-
-                    // This is the user's current level
-                    if (level === this.userMaxLevel) {
-                        // Check if user completed it
-                        if (this.userStatus === 'COMPLETED') {
-                            return 'COMPLETED';
-                        }
-                        // User is currently on this level
-                        return 'ACTIVE';
-                    }
-                }
-
-                // Default fallback
+                const gStatus = this.roundsMap[level] || 'pending';
+                if (gStatus === 'completed') return 'COMPLETED';
+                // Successive levels logic
+                if (level < this.userMaxLevel) return 'COMPLETED';
+                if (level === this.userMaxLevel && this.userStatus === 'COMPLETED') return 'COMPLETED';
+                if (gStatus === 'active') return 'ACTIVE';
+                if (gStatus === 'paused') return 'PAUSED';
+                if (level === 1) return 'ACTIVE';  // Default Level 1 to ACTIVE
                 return 'LOCKED';
             },
 
