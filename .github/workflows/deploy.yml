@@ -53,6 +53,27 @@ jobs:
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
           
+          # Verify Health
+          echo "Verifying service health..."
+          sleep 5
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
+          
           rm /tmp/app.tar.gz
           echo "Deployment to Master completed."
         '
@@ -72,6 +93,27 @@ jobs:
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
+          
+          # Verify Health
+          echo "Verifying service health..."
+          sleep 5
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
           rm /tmp/app.tar.gz
           echo "Deployment to Worker 1 completed."
         '
@@ -91,6 +133,27 @@ jobs:
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
+          
+          # Verify Health
+          echo "Verifying service health..."
+          sleep 5
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
           rm /tmp/app.tar.gz
           echo "Deployment to Worker 2 completed."
         '
@@ -110,6 +173,27 @@ jobs:
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
+          
+          # Verify Health
+          echo "Verifying service health..."
+          sleep 5
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
           rm /tmp/app.tar.gz
           echo "Deployment to Worker 3 completed."
         '
