@@ -108,18 +108,32 @@ jobs:
                     ELAPSED=$((i / 2))
                     echo "[$ELAPSED min] Status: $STATUS"
                     
-                    if [[ "$STATUS" == *"COMPLETE"* ]]; then
+                    # Check for successful completion ONLY
+                    if [[ "$STATUS" == "UPDATE_COMPLETE" ]]; then
                       echo "✅ Stack update completed successfully!"
                       exit 0
-                    elif [[ "$STATUS" == *"FAILED"* ]] || [[ "$STATUS" == *"ROLLBACK"* ]]; then
-                      echo "❌ Stack update failed!"
+                    # Check for any failure or rollback states
+                    elif [[ "$STATUS" == *"ROLLBACK"* ]] || [[ "$STATUS" == *"FAILED"* ]]; then
+                      echo "❌ Stack update FAILED and rolled back!"
+                      echo ""
+                      echo "=== FAILURE REASON ==="
                       
                       echo "Recent failure events:"
                       aws cloudformation describe-stack-events \
                         --stack-name debug-marathon-stack \
                         --region ap-southeast-1 \
-                        --query "StackEvents[?ResourceStatus=='UPDATE_FAILED']|[0:5].[Timestamp,LogicalResourceId,ResourceStatusReason]" \
+                        --query "StackEvents[?ResourceStatus=='UPDATE_FAILED' || ResourceStatus=='UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS']|[0:10].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]" \
                         --output table
+                      
+                      echo ""
+                      echo "=== POSSIBLE CAUSES ==="
+                      echo "1. RDS instance class not available (db.m5.large)"
+                      echo "2. Storage cannot be reduced (GP2 20GB to GP3 100GB should work)"
+                      echo "3. Parameter validation failed"
+                      echo "4. Insufficient permissions"
+                      echo "5. Resource limits/quotas exceeded"
+                      echo ""
+                      echo "Check the ResourceStatusReason above for the exact cause."
                       exit 1
                     fi
                   done
