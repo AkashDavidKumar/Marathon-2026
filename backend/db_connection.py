@@ -79,8 +79,8 @@ class MySQLManager:
             if os.getenv('DB_NAME'): base_config['database'] = os.getenv('DB_NAME')
             
             target_db = database or base_config.pop('database', 'debug_marathon_v3')
-
-
+            
+            try:
                 full_config = base_config.copy()
                 full_config['database'] = target_db
                 self.pool = mysql.connector.pooling.MySQLConnectionPool(
