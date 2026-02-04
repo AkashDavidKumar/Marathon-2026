@@ -318,11 +318,12 @@
                             onclick="CodeEditor.editor.setFontSize(parseInt(CodeEditor.editor.getFontSize()) - 1)">A-</button>
                     </div>
                     <div class="toolbar-group">
-                        <button class="btn btn-primary" onclick="Contest.runCode()" id="btn-run"
+                        <button class="btn btn-primary" onclick="Contest.handleDebouncedAction('run')" id="btn-run"
                             style="background-color: var(--success); border: none;">
                             <i class="fa-solid fa-play" style="margin-right: 6px;"></i> Run
                         </button>
-                        <button class="btn btn-primary" onclick="Contest.handleToolbarSubmit()" id="btn-submit"
+                        <button class="btn btn-primary" onclick="Contest.handleDebouncedAction('submit')"
+                            id="btn-submit"
                             style="background: var(--primary-600); border: none; font-weight: 700; padding: 6px 20px;">
                             <i class="fa-solid fa-cloud-upload" style="margin-right: 6px;"></i> Submit
                         </button>
@@ -467,6 +468,36 @@
             isProctoringActive: false,
             lastStateHash: '',
             allowedLanguage: 'python', // Default
+            actionLock: false,
+
+            async handleDebouncedAction(action) {
+                if (this.actionLock) return;
+                this.actionLock = true;
+
+                const btnId = action === 'run' ? 'btn-run' : 'btn-submit';
+                const btn = document.getElementById(btnId);
+                const originalText = btn ? btn.innerHTML : '';
+
+                if (btn) {
+                    btn.classList.add('btn-disabled');
+                    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
+                }
+
+                try {
+                    if (action === 'run') await this.runCode();
+                    if (action === 'submit') await this.handleToolbarSubmit();
+                } catch (e) {
+                    console.error("Action", e);
+                } finally {
+                    setTimeout(() => {
+                        this.actionLock = false;
+                        if (btn) {
+                            btn.classList.remove('btn-disabled');
+                            btn.innerHTML = originalText;
+                        }
+                    }, 1000);
+                }
+            },
 
             getStateHash(res) {
                 return JSON.stringify({

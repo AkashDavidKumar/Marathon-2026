@@ -81,13 +81,13 @@ class MySQLManager:
             target_db = database or base_config.pop('database', 'debug_marathon_v3')
 
 
-            try:
                 full_config = base_config.copy()
                 full_config['database'] = target_db
                 self.pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name=f"debug_marathon_pool_{self.pid}",
-                    pool_size=30,
+                    pool_size=20, # Optimized: Increased from default
                     pool_reset_session=True,
+                    connection_timeout=60, # Connection timeout 60s
                     **full_config
                 )
                 logger.info(f"Connection pool initialized with database '{target_db}' for PID {self.pid}.")
