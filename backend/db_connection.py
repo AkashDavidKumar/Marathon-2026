@@ -85,9 +85,9 @@ class MySQLManager:
                 full_config['database'] = target_db
                 self.pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name=f"debug_marathon_pool_{self.pid}",
-                    pool_size=30, # Optimized: Increased to match Architecture
+                    pool_size=5, # EMERGENCY FIX: Reduced to 5 to prevent exhaustion
                     pool_reset_session=True,
-                    connection_timeout=60, # Connection timeout 60s
+                    connection_timeout=30, # Reduced to 30s
                     **full_config
                 )
                 logger.info(f"Connection pool initialized with database '{target_db}' for PID {self.pid}.")
@@ -97,7 +97,7 @@ class MySQLManager:
                     base_config.pop('database', None)
                     self.pool = mysql.connector.pooling.MySQLConnectionPool(
                         pool_name=f"debug_marathon_pool_{self.pid}",
-                        pool_size=30,
+                        pool_size=5, # EMERGENCY FIX: Reduced to 5
                         pool_reset_session=True,
                         **base_config
                     )
@@ -118,15 +118,15 @@ class MySQLManager:
             if conn.is_connected():
                 # Aggressive ping to ensure connection in multi-AZ/multi-server environment
                 try:
-                    conn.ping(reconnect=True, attempts=3, delay=1)
+                    conn.ping(reconnect=True, attempts=2, delay=1) # Reduced retries
                 except Error:
                     # If ping fails, force a new connection if possible or retry
                     logger.warning("Connection ping failed, attempting reconnect...")
-                    conn.reconnect(attempts=3, delay=2)
+                    conn.reconnect(attempts=2, delay=1)
                 return conn
             else:
                 try:
-                    conn.reconnect(attempts=3, delay=2)
+                    conn.reconnect(attempts=2, delay=1)
                     return conn
                 except:
                     return None
