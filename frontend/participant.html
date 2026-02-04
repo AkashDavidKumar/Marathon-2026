@@ -529,186 +529,37 @@
                     solved: (res.solved_ids || []).length,
                     violations: res.violations,
                     global_level: res.global_level,
+                    rounds_map: res.rounds_map, // Added to detect status changes
                     results_released: res.results_released,
                     is_shortlisted_next: res.is_shortlisted_next,
                     countdown: res.countdown ? res.countdown.active : false
                 });
             },
 
-            async init(user) {
-                console.log("Contest Init Started");
-                this.user = user;
-                if (window.CodeEditor) CodeEditor.init('ace-editor');
-                this.showFullscreenRequestOverlay();
-                await this.syncContestState();
-                await this.fetchAndApplyState();
-                setInterval(() => this.fetchAndApplyState(), 10000); // Optimized: Reduced polling to 10s
-                this.initSocketIO();
-            },
-
-            async syncContestState() {
-                try {
-                    const data = await API.request('/contest');
-                    const active = (data.contests || []).find(c => c.status === 'live' || c.status === 'paused');
-                    if (active) this.activeContestId = active.id;
-                } catch (e) { console.error("Sync Error", e); }
-            },
-
-            async fetchAndApplyState() {
-                try {
-                    if (!this.user || !this.activeContestId) return;
-                    const res = await API.request('/contest/participant-state', 'POST', {
-                        user_id: this.user.participant_id,
-                        contest_id: this.activeContestId
-                    });
-                    if (res && res.success) {
-                        const stateHash = this.getStateHash(res);
-                        if (stateHash === this.lastStateHash) return;
-                        this.lastStateHash = stateHash;
-                        if (res.is_eliminated) {
-                            this.logout();
-                            return;
-                        }
-                        this.userMaxLevel = res.level || 1;
-                        this.userStatus = res.status || 'NOT_STARTED';
-                        this.roundsMap = res.rounds_map || {};
-                        if (res.start_time) {
-                            this.levelStartTime = res.start_time;
-                            this.levelDuration = res.level_duration_minutes || 45;
-                            this.startTimer();
-                        }
-                        this.solvedQuestions = new Set(res.solved_ids || []);
-                        if (window.Proctoring) {
-                            window.Proctoring.violations = res.violations || 0;
-                            window.Proctoring.updateBadge();
-                            if (res.violations > 20) {
-                                this.logout();
-                            }
-                        }
-                        if (res.countdown) {
-                            this.handleCountdown(res.countdown);
-                        }
-                        this.renderLevelSelection();
-                        this.updateRoadmapUI(); // Ensure top roadmap stays in sync
-
-                        // ---------------- NEW NOTIFICATION LOGIC ----------------
-                        const selOverlay = document.getElementById('selected-overlay');
-                        const unselOverlay = document.getElementById('unselected-overlay');
-
-                        if (!selOverlay || !unselOverlay) return;
-
-                        // FIX: Get authoritative status of the current level
-                        const currentLvl = res.level || 1;
-                        const levelStatusFromMap = (res.rounds_map && res.rounds_map[currentLvl]) ? res.rounds_map[currentLvl] : 'pending';
-
-                        // Show overlays only if:
-                        // 1. User is NOT inside the level (IN_PROGRESS)
-                        // 2. Admin explicitly released results
-                        // 3. The level itself is COMPLETED (prevents premature showing during active level)
-                        if (this.userStatus !== 'IN_PROGRESS' && res.results_released && levelStatusFromMap === 'completed') {
-                            if (res.is_shortlisted_next) {
-                                unselOverlay.style.display = 'none';
-                                selOverlay.style.display = 'flex';
-
-                                // Check if global level has advanced (Level Started)
-                                if (res.global_level > this.userMaxLevel) {
-                                    // Update overlay to show Enter button if not already showing
-                                    if (!document.getElementById('btn-enter-next')) {
-                                        selOverlay.innerHTML = `
-                                            <i class="fa-solid fa-rocket" style="font-size: 5rem; color: #3b82f6; margin-bottom: 2rem; animation: bounce 1s infinite;"></i>
-                                            <h1 style="font-size: 3rem; font-weight: 800; color: white; margin-bottom: 1rem;">LEVEL ${res.global_level} STARTED!</h1>
-                                            <p style="color:white; font-size:1.2rem; margin-bottom:2rem;">The round is live. Good luck!</p>
-                                            <button id="btn-enter-next" class="btn btn-primary" onclick="Contest.handleLevelClick(${res.global_level}); document.getElementById('selected-overlay').style.display='none';"
-                                                style="padding: 1rem 3rem; font-size: 1.5rem; border-radius: 50px; box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);">
-                                                ENTER NOW
-                                            </button>
-                                        `;
-                                    }
-                                }
-                            } else {
-                                // Not Selected
-                                selOverlay.style.display = 'none';
-                                unselOverlay.style.display = 'flex';
-                            }
-                        } else {
-                            // Hide overlays if logic doesn't apply
-                            selOverlay.style.display = 'none';
-                            unselOverlay.style.display = 'none';
-                        }
-                        // --------------------------------------------------------
-                    }
-                } catch (e) { console.error("Fetch State Error", e); }
-            },
-
-            startTimer() {
-                if (this.timerInterval) clearInterval(this.timerInterval);
-                const update = () => {
-                    const timerEl = document.getElementById('contest-timer');
-                    if (!timerEl) return;
-
-                    if (!this.levelStartTime) {
-                        timerEl.innerText = "00:00:00";
-                        return;
-                    }
-
-                    // Use UTC absolute comparison
-                    const now = new Date();
-                    let startStr = this.levelStartTime;
-
-                    if (!startStr.endsWith('Z') && !startStr.includes('+')) {
-                        startStr += 'Z';
-                    }
-
-                    const startT = new Date(startStr);
-                    if (isNaN(startT.getTime())) {
-                        timerEl.innerText = "--:--:--";
-                        return;
-                    }
-
-                    const endsAt = new Date(startT.getTime() + (this.levelDuration * 60000));
-                    const diff = endsAt.getTime() - now.getTime();
-
-                    if (diff <= 0) {
-                        timerEl.innerText = "00:00:00";
-                        timerEl.classList.add('danger');
-                        return;
-                    }
-
-                    const h = Math.floor(diff / 3600000);
-                    const m = Math.floor((diff % 3600000) / 60000);
-                    const s = Math.floor((diff % 60000) / 1000);
-
-                    timerEl.innerText = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-
-                    if (diff < 300000) timerEl.classList.add('warning'); // 5 mins left
-                    else timerEl.classList.remove('warning', 'danger');
-                };
-                update();
-                this.timerInterval = setInterval(update, 1000);
-            },
+            // ... init ... (Keep this as is, don't include in replacement if not needed, but line numbers need to match) -> Actually I can't skip lines easily.
+            // I'll replace specifically the functions.
 
             renderLevelSelection() {
                 const grid = document.getElementById('level-selection-grid');
                 if (!grid) return;
-                let html = '';
+
                 for (let i = 1; i <= 5; i++) {
                     const status = this.resolveLevelStatus(i);
-                    html += this.buildLevelCard(i, status);
+                    let card = document.getElementById(`level-card-${i}`);
+
+                    if (!card) {
+                        // Create new
+                        grid.insertAdjacentHTML('beforeend', this.buildLevelCard(i, status));
+                    } else {
+                        // Update if status changed
+                        if (card.dataset.status !== status) {
+                            card.outerHTML = this.buildLevelCard(i, status);
+                        }
+                    }
                 }
-                grid.innerHTML = html;
             },
 
-            resolveLevelStatus(level) {
-                const gStatus = this.roundsMap[level] || 'pending';
-                if (gStatus === 'completed') return 'COMPLETED';
-                // Successive levels logic
-                if (level < this.userMaxLevel) return 'COMPLETED';
-                if (level === this.userMaxLevel && this.userStatus === 'COMPLETED') return 'COMPLETED';
-                if (gStatus === 'active') return 'ACTIVE';
-                if (gStatus === 'paused') return 'PAUSED';
-                if (level === 1) return 'ACTIVE';
-                return 'LOCKED';
-            },
+            // resolveLevelStatus is fine.
 
             buildLevelCard(level, status) {
                 const styles = {
@@ -721,7 +572,7 @@
                 const btnHtml = status === 'ACTIVE' ? `<div class="enter-btn-label" style="margin-top:1rem; background:white; color:#3b82f6; padding:0.4rem 1rem; border-radius:2rem; font-weight:700; font-size:0.7rem;">ENTER</div>` : '';
 
                 return `
-                <div class="level-card-item" onclick="Contest.handleLevelClick(${level})" style="border-radius: 1rem; padding: 1.5rem; width: 200px; display: flex; flex-direction: column; align-items: center; text-align: center; transition: all 0.3s ease; ${styles[status] || styles['LOCKED']}">
+                <div id="level-card-${level}" data-status="${status}" class="level-card-item" onclick="Contest.handleLevelClick(${level})" style="border-radius: 1rem; padding: 1.5rem; width: 200px; display: flex; flex-direction: column; align-items: center; text-align: center; transition: all 0.3s ease; ${styles[status] || styles['LOCKED']}">
                     <div style="font-size: 2.5rem; margin-bottom: 0.75rem;"><i class="fa-solid ${icons[status]}"></i></div>
                     <h2 style="margin: 0; font-size: 1.2rem; font-weight: 700;">Level ${level}</h2>
                     <p style="margin-top: 0.25rem; opacity: 0.9; font-weight: 500; font-size: 0.8rem;">${status}</p>
