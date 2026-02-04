@@ -489,190 +489,107 @@
             userMaxLevel: 1,
             userStatus: 'NOT_STARTED',
             isProctoringActive: false,
-            lastStateHash: '',
+            isThrottled: false,
+            _eventsBound: false,
+            countdownInterval: null,
             allowedLanguage: 'python', // Default
-            actionLock: false,
-
-            async handleDebouncedAction(action) {
-                if (this.actionLock) return;
-                this.actionLock = true;
-
-                const btnId = action === 'run' ? 'btn-run' : 'btn-submit';
-                const btn = document.getElementById(btnId);
-                const originalText = btn ? btn.innerHTML : '';
-
-                if (btn) {
-                    btn.classList.add('btn-disabled');
-                    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i>`;
-                }
-
-                try {
-                    if (action === 'run') await this.runCode();
-                    if (action === 'submit') await this.handleToolbarSubmit();
-                } catch (e) {
-                    console.error("Action", e);
-                } finally {
-                    setTimeout(() => {
-                        this.actionLock = false;
-                        if (btn) {
-                            btn.classList.remove('btn-disabled');
-                            btn.innerHTML = originalText;
-                        }
-                    }, 1000);
-                }
-            },
-
-            getStateHash(res) {
-                return JSON.stringify({
-                    level: res.level,
-                    status: res.status,
-                    solved: (res.solved_ids || []).length,
-                    violations: res.violations,
-                    global_level: res.global_level,
-                    rounds_map: res.rounds_map, // Added to detect status changes
-                    results_released: res.results_released,
-                    is_shortlisted_next: res.is_shortlisted_next,
-                    countdown: res.countdown ? res.countdown.active : false
-                });
-            },
-
 
             async init(user) {
+                console.log("Contest Init Started");
                 this.user = user;
-                console.log('Contest.init() called for user:', user.participant_id);
-
-                // Find active contest
-                try {
-                    const contestsRes = await API.request('/contest');
-                    const contests = contestsRes.contests || [];
-                    const liveContest = contests.find(c => c.status === 'live');
-
-                    if (liveContest) {
-                        this.activeContestId = liveContest.id;
-                        console.log('Active Contest ID:', this.activeContestId);
-                    } else {
-                        // Fallback to ID 1
-                        this.activeContestId = 1;
-                        console.warn('No live contest found, using ID 1');
-                    }
-                } catch (e) {
-                    console.error('Failed to fetch contests:', e);
-                    this.activeContestId = 1;
-                }
-
-                // Initialize Socket.IO
-                this.initSocketIO();
-
-                // Fetch and apply initial state
+                if (window.CodeEditor) CodeEditor.init('ace-editor');
+                this.showFullscreenRequestOverlay();
+                await this.syncContestState();
                 await this.fetchAndApplyState();
-
-                // Render level selection cards
-                this.renderLevelSelection();
-
-                // Start periodic state polling (every 10s)
-                setInterval(() => this.fetchAndApplyState(), 10000);
-
-                // Enforce fullscreen monitoring
+                setInterval(() => this.fetchAndApplyState(), 3000);
+                this.initSocketIO();
                 this.enforceFullscreen();
             },
 
-            async fetchAndApplyState() {
-                if (!this.user || !this.activeContestId) return;
-
+            async syncContestState() {
                 try {
+                    const data = await API.request('/contest');
+                    const active = (data.contests || []).find(c => c.status === 'live');
+                    if (active) this.activeContestId = active.id;
+                } catch (e) { console.error("Sync Error", e); }
+            },
+
+            async fetchAndApplyState() {
+                try {
+                    if (!this.user || !this.activeContestId) return;
                     const res = await API.request('/contest/participant-state', 'POST', {
                         user_id: this.user.participant_id,
                         contest_id: this.activeContestId
                     });
+                    if (res && res.success) {
+                        if (res.is_eliminated) {
+                            this.logout();
+                            return;
+                        }
+                        this.userMaxLevel = res.level || 1;
+                        this.userStatus = res.status || 'NOT_STARTED';
+                        this.roundsMap = res.rounds_map || {};
 
-                    if (!res || !res.success) {
-                        console.error('Failed to fetch state:', res);
-                        return;
-                    }
+                        if (res.solved_ids) {
+                            this.solvedQuestions = new Set(res.solved_ids.map(String));
+                        }
 
-                    // Update state
-                    this.userMaxLevel = res.level || 1;
-                    this.userStatus = res.status || 'NOT_STARTED';
-                    this.roundsMap = res.rounds_map || {};
+                        if (res.start_time) {
+                            this.levelStartTime = res.start_time;
+                            this.levelDuration = res.level_duration_minutes || 45;
+                            this.startTimer();
+                        }
+                        if (window.Proctoring) {
+                            window.Proctoring.violations = res.violations || 0;
+                            window.Proctoring.updateBadge();
+                            if (res.violations > 20) {
+                                this.logout();
+                            }
+                        }
+                        if (res.countdown) {
+                            this.handleCountdown(res.countdown);
+                        }
 
-                    // Debug logging
-                    console.log('📊 State Updated:', {
-                        userMaxLevel: this.userMaxLevel,
-                        userStatus: this.userStatus,
-                        roundsMap: this.roundsMap,
-                        globalLevel: res.global_level
-                    });
-
-                    // Update solved questions
-                    if (res.solved_ids) {
-                        this.solvedQuestions = new Set(res.solved_ids.map(String));
-                    }
-
-                    // Check for state changes
-                    const newHash = this.getStateHash(res);
-                    if (newHash !== this.lastStateHash) {
-                        console.log('State changed, updating UI');
-                        this.lastStateHash = newHash;
-
-                        // Re-render level cards if on selection screen
                         const selectionSection = document.getElementById('level-selection-section');
                         if (selectionSection && selectionSection.style.display !== 'none') {
                             this.renderLevelSelection();
                         }
-
-                        // Update roadmap if in editor
                         this.updateRoadmapUI();
-                    }
 
-                    // Handle countdown
-                    if (res.countdown) {
-                        this.handleCountdown(res.countdown);
-                    }
+                        // ---------------- NOTIFICATION LOGIC ----------------
+                        const selOverlay = document.getElementById('selected-overlay');
+                        const unselOverlay = document.getElementById('unselected-overlay');
 
-                    // ---------------- NOTIFICATION LOGIC (from working offline version) ----------------
-                    const selOverlay = document.getElementById('selected-overlay');
-                    const unselOverlay = document.getElementById('unselected-overlay');
+                        const currentLvl = res.level || 1;
+                        const levelStatus = (res.rounds_map && res.rounds_map[currentLvl]) ? res.rounds_map[currentLvl] : 'pending';
 
-                    // Get authoritative status of the current level
-                    const currentLvl = res.level || 1;
-                    const levelStatus = (res.rounds_map && res.rounds_map[currentLvl]) ? res.rounds_map[currentLvl] : 'pending';
+                        if (this.userStatus !== 'IN_PROGRESS' && res.results_released && levelStatus === 'completed') {
+                            if (res.is_shortlisted_next) {
+                                if (unselOverlay) unselOverlay.style.display = 'none';
+                                if (selOverlay) selOverlay.style.display = 'flex';
 
-                    // Show overlays only if:
-                    // 1. User is NOT inside the level (IN_PROGRESS)
-                    // 2. Admin explicitly released results
-                    // 3. The level itself is COMPLETED (prevents premature showing during active level)
-                    if (this.userStatus !== 'IN_PROGRESS' && res.results_released && levelStatus === 'completed') {
-                        if (res.is_shortlisted_next) {
-                            unselOverlay.style.display = 'none';
-                            selOverlay.style.display = 'flex';
-
-                            // Check if global level has advanced (Level Started)
-                            if (res.global_level > this.userMaxLevel) {
-                                // Update overlay to show Enter button if not already showing
-                                if (!document.getElementById('btn-enter-next')) {
-                                    selOverlay.innerHTML = `
-                                        <i class="fa-solid fa-rocket" style="font-size: 5rem; color: #3b82f6; margin-bottom: 2rem; animation: bounce 1s infinite;"></i>
-                                        <h1 style="font-size: 3rem; font-weight: 800; color: white; margin-bottom: 1rem;">LEVEL ${res.global_level} STARTED!</h1>
-                                        <p style="color:white; font-size:1.2rem; margin-bottom:2rem;">The round is live. Good luck!</p>
-                                        <button id="btn-enter-next" class="btn btn-primary" onclick="Contest.handleLevelClick(${res.global_level}); document.getElementById('selected-overlay').style.display='none';"
-                                            style="padding: 1rem 3rem; font-size: 1.5rem; border-radius: 50px; box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);">
-                                            ENTER NOW
-                                        </button>
-                                    `;
+                                if (res.global_level > this.userMaxLevel) {
+                                    if (!document.getElementById('btn-enter-next')) {
+                                        selOverlay.innerHTML = `
+                                            <i class="fa-solid fa-rocket" style="font-size: 5rem; color: #3b82f6; margin-bottom: 2rem; animation: bounce 1s infinite;"></i>
+                                            <h1 style="font-size: 3rem; font-weight: 800; color: white; margin-bottom: 1rem;">LEVEL ${res.global_level} STARTED!</h1>
+                                            <p style="color:white; font-size:1.2rem; margin-bottom:2rem;">The round is live. Good luck!</p>
+                                            <button id="btn-enter-next" class="btn btn-primary" onclick="Contest.handleLevelClick(${res.global_level}); document.getElementById('selected-overlay').style.display='none';"
+                                                style="padding: 1rem 3rem; font-size: 1.5rem; border-radius: 50px; box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);">
+                                                ENTER NOW
+                                            </button>
+                                        `;
+                                    }
                                 }
+                            } else {
+                                if (selOverlay) selOverlay.style.display = 'none';
+                                if (unselOverlay) unselOverlay.style.display = 'flex';
                             }
                         } else {
-                            // Not Selected
-                            selOverlay.style.display = 'none';
-                            unselOverlay.style.display = 'flex';
+                            if (selOverlay) selOverlay.style.display = 'none';
+                            if (unselOverlay) unselOverlay.style.display = 'none';
                         }
-                    } else {
-                        // Hide overlays if logic doesn't apply
-                        if (selOverlay) selOverlay.style.display = 'none';
-                        if (unselOverlay) unselOverlay.style.display = 'none';
                     }
-                    // --------------------------------------------------------
-
                 } catch (e) {
                     console.error('fetchAndApplyState error:', e);
                 }
@@ -745,25 +662,20 @@
 
             async startLevel() {
                 try {
-                    console.log('Starting level:', this.currentLevel, 'for user:', this.user.participant_id);
                     const res = await API.request('/contest/start-level', 'POST', {
                         user_id: this.user.participant_id,
                         contest_id: this.activeContestId,
                         level: this.currentLevel
                     });
-                    console.log('Start level response:', res);
 
                     if (res && res.success) {
                         document.getElementById('level-start-overlay').style.display = 'none';
                         this.levelStartTime = res.start_time;
-                        this.levelDuration = res.level_duration_minutes;
+                        this.levelDuration = res.level_duration_minutes || 45;
                         this.startTimer();
                         this.enterLevel(this.currentLevel);
                     } else {
-                        // Backend returned error
-                        const errorMsg = res?.error || res?.message || 'Unknown error';
-                        console.error('Backend error:', errorMsg);
-                        Toast.show(`Failed to start: ${errorMsg}`, "error");
+                        Toast.show(`Failed to start: ${res.error || 'Unknown error'}`, "error");
                     }
                 } catch (e) {
                     console.error("Start level error", e);
@@ -775,14 +687,8 @@
                 if (this.timerInterval) clearInterval(this.timerInterval);
                 const update = () => {
                     const timerEl = document.getElementById('contest-timer');
-                    if (!timerEl) return;
+                    if (!timerEl || !this.levelStartTime) return;
 
-                    if (!this.levelStartTime) {
-                        timerEl.innerText = "00:00:00";
-                        return;
-                    }
-
-                    // Use UTC absolute comparison
                     const now = new Date();
                     let startStr = this.levelStartTime;
 
@@ -791,10 +697,6 @@
                     }
 
                     const startT = new Date(startStr);
-                    if (isNaN(startT.getTime())) {
-                        timerEl.innerText = "--:--:--";
-                        return;
-                    }
 
                     const endsAt = new Date(startT.getTime() + (this.levelDuration * 60000));
                     const diff = endsAt.getTime() - now.getTime();
@@ -855,7 +757,6 @@
 
                     if (i === this.currentLevel) {
                         badge.classList.add('active');
-                        badge.innerHTML = `Lvl ${i}`;
                     } else if (status === 'COMPLETED') {
                         badge.classList.add('completed');
                         badge.innerHTML = `Lvl ${i} <i class="fa-solid fa-check"></i>`;
@@ -910,25 +811,19 @@
                 const tabs = document.querySelector('.q-tabs');
                 if (!tabs) return;
                 tabs.innerHTML = '<div class="loading-spinner">Loading Questions...</div>';
-
                 try {
                     const data = await API.request(`/contest/questions?contest_id=${this.activeContestId}&level=${this.currentLevel}`);
                     if (!data || !data.questions || data.questions.length === 0) {
                         tabs.innerHTML = `<div class="error-msg">No questions found for Level ${this.currentLevel}</div>`;
                         return;
                     }
-
-                    // Strict Language Enforcement
                     this.allowedLanguage = (data.allowed_language || 'python').toLowerCase();
                     const langMap = { 'c': 'C (GCC)', 'cpp': 'C++', 'python': 'Python 3', 'java': 'Java', 'javascript': 'JavaScript' };
                     document.getElementById('lang-display').innerText = langMap[this.allowedLanguage] || 'Python 3';
-
-                    // Set Editor Mode strictly
                     if (window.CodeEditor) {
                         CodeEditor.setLanguage(this.allowedLanguage);
                     }
-
-                    this.questions = data.questions; // Expecting sorted from backend
+                    this.questions = data.questions;
                     this.renderTabs();
                     this.switchQuestion(0);
                 } catch (e) {
@@ -939,7 +834,7 @@
 
             renderTabs() {
                 const tabs = document.querySelector('.q-tabs');
-                // Questions should be already sorted by backend
+                if (!tabs) return;
                 tabs.innerHTML = this.questions.map((q, i) => `
                     <div class="q-tab ${i === this.currentQId ? 'active' : ''} ${this.solvedQuestions.has(String(q.id)) ? 'solved' : ''}" onclick="Contest.switchQuestion(${i})">
                         Q${i + 1} ${this.solvedQuestions.has(String(q.id)) ? '✓' : ''}
@@ -947,20 +842,13 @@
             },
 
             switchQuestion(idx) {
-                if (!this.questions || this.questions.length === 0) {
-                    console.warn("No questions to switch to");
-                    return;
-                }
+                if (!this.questions || this.questions.length === 0) return;
                 this.currentQId = idx;
                 this.renderTabs();
                 const q = this.questions[idx];
                 if (!q) return;
-
                 const detail = document.getElementById('q-details');
-
-                const expInput = "Hidden"; // Enforce Hiding Input
                 const expOutput = q.expected_output || (q.test_cases && q.test_cases.length > 0 ? q.test_cases[0].expected : "Hidden");
-
                 if (detail) {
                     detail.innerHTML = `
                         <div class="q-header">
@@ -968,7 +856,6 @@
                             <h3>${q.title}</h3>
                         </div>
                         <div class="q-body">${q.description}</div>
-                        
                         <div style="margin-top: 1.5rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
                             <h4 style="margin:0 0 0.5rem 0; font-size:0.9rem; color:#475569;">Sample Case</h4>
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
@@ -982,94 +869,62 @@
                                 </div>
                             </div>
                         </div>
-                     `;
+                    `;
                 }
-
-                // Set boilerplate
-                CodeEditor.editor.setValue(q.buggy_code || q.boilerplate?.python || "", -1);
-
-                // Update Submit Button State
+                CodeEditor.editor.setValue(q.buggy_code || q.boilerplate?.[this.allowedLanguage.toLowerCase()] || q.boilerplate?.python || "", -1);
                 const btn = document.getElementById('btn-submit');
                 if (btn) {
-                    // Disable by default until run passes
                     btn.classList.add('btn-disabled');
                     btn.disabled = true;
-
-                    // Check if Last Question
                     if (idx === this.questions.length - 1) {
-                        btn.innerHTML = '<i class="fa-solid fa-flag-checkered" style="margin-right: 6px;"></i> Master Submit';
+                        btn.innerHTML = '<i class="fa-solid fa-flag-checkered"></i> Master Submit';
                         btn.style.background = 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)';
                         btn.dataset.action = 'master';
                     } else {
-                        btn.innerHTML = '<i class="fa-solid fa-cloud-upload" style="margin-right: 6px;"></i> Submit';
-                        btn.style.background = ''; // Reset
+                        btn.innerHTML = '<i class="fa-solid fa-cloud-upload"></i> Submit';
+                        btn.style.background = '';
                         btn.dataset.action = 'normal';
                     }
                 }
-
-                // Clear Output
                 document.getElementById('console-output').innerHTML = "Ready to execute...";
             },
 
             async handleToolbarSubmit() {
                 const btn = document.getElementById('btn-submit');
-                if (btn.disabled) {
-                    Toast.show("Please Run and Pass the code first.", "warning");
-                    return;
-                }
-
+                if (!btn || btn.disabled) return;
                 const action = btn.dataset.action;
                 const q = this.questions[this.currentQId];
                 if (!q) return;
                 const isSolved = this.solvedQuestions.has(String(q.id));
 
                 if (action === 'master') {
-                    // Master Submit Flow: Submit current if needed, then finalize
                     if (!isSolved) {
-                        try {
-                            const success = await this.performSubmit(true, true);
-                            if (success) {
-                                setTimeout(() => {
-                                    Modal.show(
-                                        "Level Completed!",
-                                        "Solution Correct. Ready to finalize level?",
-                                        () => this.submitLevel(),
-                                        "confirm"
-                                    );
-                                }, 800);
-                            }
-                        } catch (e) { console.error(e); }
+                        const success = await this.performSubmit(true, true);
+                        if (success) {
+                            setTimeout(() => {
+                                Modal.show("Level Completed!", "Solution Correct! Ready to finalize the level?", () => this.submitLevel());
+                            }, 500);
+                        }
                     } else {
-                        Modal.show(
-                            "Confirm Master Submit",
-                            "This will finalize your level attempt and lock further edits. Are you sure?",
-                            () => this.submitLevel(),
-                            "confirm"
-                        );
+                        Modal.show("Confirm Master Submit", "Are you sure you want to finalize the level?", () => this.submitLevel());
                     }
                 } else {
-                    Modal.show(
-                        "Confirm Submission",
-                        "Are you sure you want to submit? This will be graded.", () => {
-                            this.performSubmit();
-                        }
-                    );
+                    Modal.show("Confirm Submission", "Are you sure you want to submit?", () => this.performSubmit());
                 }
             },
 
             renderTestResults(results, isSubmit = false, warnings = null) {
                 const outDiv = document.getElementById('console-output');
+                if (!outDiv) return;
                 if (!results || !results.length) {
                     outDiv.innerHTML = "No results returned.";
                     return;
                 }
                 let html = isSubmit ? '<h4 class="submit-res">Submission Results</h4>' : '<h4 class="run-res">Run Results</h4>';
-
                 if (warnings) {
-                    html += `<div style="background:#fffbeb; color:#b45309; padding:0.75rem; margin-bottom:1rem; border-radius:0.5rem; border:1px solid #fcd34d; font-family:'Fira Code', monospace; white-space:pre-wrap; font-size:0.9rem;"><i class="fa-solid fa-triangle-exclamation"></i> <strong>Compilation Warnings:</strong>\n${warnings}</div>`;
+                    html += `<div style="background:#fffbeb; color:#b45309; padding:0.75rem; margin-bottom:1rem; border-radius:0.5rem; border:1px solid #fcd34d; font-family:'Fira Code', monospace; white-space:pre-wrap; font-size:0.9rem;">${warnings}</div>`;
                 }
                 let allPassed = true;
-
                 results.forEach((r, i) => {
                     if (!r.passed) allPassed = false;
                     html += `
@@ -1078,118 +933,24 @@
                                 <strong>Case ${i + 1}</strong> 
                                 <span class="badge ${r.passed ? 'success' : 'danger'}">${r.passed ? 'Passed' : 'Failed'}</span>
                             </div>
-                            <div class="tc-details" style="margin-top:0.5rem; font-size:0.85rem;">
-                                <div style="display:grid; grid-template-columns:1fr; gap:0.5rem;">
-                                    <div>
-                                        <strong>Input:</strong>
-                                        <div style="background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-top:2px; color: #64748b;">
-                                            ${!isSubmit ? `<pre style="margin:0;">${r.input}</pre>` : '(Hidden)'}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <strong>Output:</strong>
-                                        <div style="background:${r.passed ? '#f0fdf4' : '#fef2f2'}; padding:4px 8px; border-radius:4px; margin-top:2px; color:${r.passed ? 'inherit' : '#ef4444'};">
-                                            <pre style="margin:0; white-space:pre-wrap;">${r.output || "No Output"}</pre>
-                                        </div>
-                                    </div>
-                                    ${!r.passed ? `
-                                    <div>
-                                        <strong>Expected:</strong>
-                                        <div style="background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-top:2px;"><code>${r.expected || "N/A"}</code></div>
-                                    </div>
-                                    ${r.error ? `<div class="err" style="color:red; margin-top:4px;">Error: ${r.error}</div>` : ''}
-                                    ` : ''}
-                                </div>
+                            <div class="tc-details">
+                                <div><strong>Input:</strong> ${!isSubmit ? `<pre style="white-space:pre-wrap;">${r.input}</pre>` : '(Hidden)'}</div>
+                                <div><strong>Output:</strong> <pre style="white-space:pre-wrap;">${r.output || "No Output"}</pre></div>
+                                ${!r.passed ? `<div><strong>Expected:</strong> <pre style="white-space:pre-wrap;">${r.expected || "N/A"}</pre></div>` : ''}
+                                ${r.error ? `<div class="err" style="color:red;">Error: ${r.error}</div>` : ''}
                             </div>
                         </div>`;
                 });
                 outDiv.innerHTML = html;
-
-                // Unlock Submission if All Passed
                 if (allPassed && !isSubmit) {
                     const btn = document.getElementById('btn-submit');
-                    if (btn) {
-                        btn.classList.remove('btn-disabled');
-                        btn.disabled = false;
-                        Toast.show("All Cases Passed! Submission Enabled.", "success");
-                    }
+                    if (btn) { btn.classList.remove('btn-disabled'); btn.disabled = false; }
                 }
             },
 
-
-
-            async handleToolbarSubmit() {
-                const q = this.questions[this.currentQId];
-                if (!q) return;
-
-                const isLastQuestion = (this.currentQId === this.questions.length - 1);
-                const isSolved = this.solvedQuestions.has(String(q.id));
-
-                if (isLastQuestion) {
-                    if (isSolved) {
-                        // Already solved, user clicking Master Submit to finish level
-                        Modal.show("Confirm Master Submit", "Are you sure you want to finalize the level? You cannot change answers after this.", () => {
-                            this.submitLevel();
-                        });
-                    } else {
-                        // Not solved yet. User probably thinks they are submitting the question.
-                        // We try to submit. If correct, we prompt for Level Finalization.
-                        Modal.show("Confirm Submission", "Submit solution for the final question?", async () => {
-                            const success = await this.performSubmit(true, true); // return result, suppress modal
-                            if (success) {
-                                // If passed, immediately ask to finalize level
-                                setTimeout(() => {
-                                    Modal.show("Level Completed!", "Solution Correct! Ready to finalize the level?", () => {
-                                        this.submitLevel();
-                                    });
-                                }, 500);
-                            }
-                        });
-                    }
-                } else {
-                    // Normal Question
-                    if (isSolved) {
-                        Toast.show("Question already solved.", "info");
-                        return;
-                    }
-                    Modal.show("Confirm Submission", "Are you sure you want to submit? This will be graded.", () => {
-                        this.performSubmit();
-                    });
-                }
-            },
-
-            async performSubmit() {
-                const code = CodeEditor.editor.getValue();
-                const q = this.questions[this.currentQId];
-
-                try {
-                    const btn = document.getElementById('btn-submit');
-                    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...'; }
-
-                    const res = await API.request('/contest/submit-question', 'POST', {
-                        code: code, language: this.allowedLanguage, // Strict
-                        question_id: q.id, user_id: this.user.participant_id,
-                        contest_id: this.activeContestId, level: this.currentLevel
-                    });
-
-                    if (res.success) {
-                        // Success Modal
-                        Modal.show("Correct!", "Your solution passed all test cases.", null, 'info');
-                        this.solvedQuestions.add(String(q.id));
-                        this.renderTabs();
-                        this.fetchAndApplyState();
-                        this.renderTestResults(res.test_results || [], true);
-                    } else {
-                        // Failure Modal/Toast
-                        Toast.show("Solution Incorrect", "error");
-                        this.renderTestResults(res.test_results || [], true);
-                    }
-                } catch (e) {
-                    Toast.show("Submission Error: " + e.message, "error");
-                } finally {
-                    const btn = document.getElementById('btn-submit');
-                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-upload"></i> Submit'; }
-                }
+            handleDebouncedAction(action) {
+                if (action === 'run') this.runCode();
+                if (action === 'submit') this.handleToolbarSubmit();
             },
 
             initSocketIO() {
@@ -1201,62 +962,42 @@
                 socket.on('contest:countdown', (data) => this.handleCountdown(data));
             },
 
-            countdownInterval: null,
-
             handleCountdown(state) {
-                // state = { active: bool, end_time: ISO, target_level: int, etc }
                 const overlay = document.getElementById('countdown-overlay');
                 if (!state || !state.active) {
                     if (overlay) overlay.style.display = 'none';
                     if (this.countdownInterval) clearInterval(this.countdownInterval);
                     return;
                 }
-
                 if (overlay) overlay.style.display = 'flex';
-
-                // Show Target Level Info
                 const msg = document.getElementById('countdown-target-msg');
-                if (msg && state.target_level) {
-                    msg.innerText = `Preparing Level ${state.target_level}...`;
-                }
-
-                // Timer Logic
+                if (msg && state.target_level) msg.innerText = `Preparing Level ${state.target_level}...`;
                 const timerDisplay = overlay.querySelector('.timer-display');
                 if (this.countdownInterval) clearInterval(this.countdownInterval);
-
                 const update = () => {
                     const now = new Date().getTime();
-                    // Basic ISO parsing (works in modern browsers)
                     let endStr = state.end_time;
                     if (endStr && !endStr.endsWith('Z')) endStr += 'Z';
-                    const end = new Date(endStr).getTime();
-                    const diff = end - now;
-
+                    const diff = new Date(endStr).getTime() - now;
                     if (diff <= 0) {
                         timerDisplay.innerText = "00:00";
                         clearInterval(this.countdownInterval);
-                        // Maybe trigger a reload?
                         setTimeout(() => this.fetchAndApplyState(), 2000);
                         return;
                     }
-
                     const m = Math.floor(diff / 60000);
                     const s = Math.floor((diff % 60000) / 1000);
                     timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
                 };
-
                 update();
                 this.countdownInterval = setInterval(update, 1000);
             },
 
             enforceFullscreen() {
-                // Persistent listener
                 document.addEventListener('fullscreenchange', () => {
                     if (!document.fullscreenElement && this.isProctoringActive) {
-                        // Exited fullscreen while active -> BLOCK
                         this.showFullscreenExitOverlay();
                     } else if (document.fullscreenElement && this.isProctoringActive) {
-                        // Returned to fullscreen -> RESTORE
                         document.getElementById('fs-exit-overlay').style.display = 'none';
                         document.getElementById('fs-request-overlay').style.display = 'none';
                         this.showView('editor');
@@ -1269,12 +1010,10 @@
                 this.isThrottled = true;
                 const btn = document.getElementById(btnId);
                 const originalText = btn ? btn.innerHTML : '';
-
                 if (btn) {
                     btn.disabled = true;
                     let timeLeft = duration / 1000;
                     btn.innerHTML = `<i class="fa-solid fa-clock"></i> Wait ${timeLeft}s`;
-
                     const interval = setInterval(() => {
                         timeLeft--;
                         if (timeLeft <= 0) {
@@ -1293,103 +1032,60 @@
             },
 
             async runCode() {
-                if (this.isThrottled) return;
-                const q = this.questions[this.currentQId];
-                if (!q) {
-                    document.getElementById('console-output').innerHTML = '<div class="error-msg">Error: Current question context invalid. Refresh page.</div>';
-                    return;
-                }
-
                 if (!this.throttleAction('btn-run', 5000)) return;
-
-                console.log("Running Code for Q:", q.id, "Title:", q.title);
-                const code = CodeEditor.editor.getValue();
+                const q = this.questions[this.currentQId];
+                if (!q) return;
                 const outDiv = document.getElementById('console-output');
                 outDiv.innerHTML = '<div class="running">Running test cases...</div>';
-
                 try {
                     const res = await API.request('/contest/run', 'POST', {
-                        code: code, language: this.allowedLanguage,
-                        question_id: Number(q.id) || q.id,
-                        user_id: this.user.participant_id,
+                        code: CodeEditor.editor.getValue(), language: this.allowedLanguage,
+                        question_id: q.id, user_id: this.user.participant_id,
                         contest_id: this.activeContestId, level: this.currentLevel
                     });
-
                     if (res && res.test_results) {
                         this.renderTestResults(res.test_results, false, res.warnings);
-                        const execTime = document.getElementById('exec-time');
-                        if (execTime) execTime.innerText = res.execution_time || "Done";
+                        if (document.getElementById('exec-time')) document.getElementById('exec-time').innerText = res.execution_time || "Done";
                     } else {
-                        // Handle specific backend error "Question not found" gracefully?
-                        // If res.error exists, show it.
-                        outDiv.innerHTML = `<div class="error-msg">${res.error || 'Execution Error: Unknown Backend Response'}</div>`;
+                        outDiv.innerHTML = `<div class="error-msg">${res.error || 'Execution Error'}</div>`;
                     }
-                } catch (e) { outDiv.innerHTML = `<div class="error-msg">Connection Error: ${e.message}</div>`; }
+                } catch (e) { outDiv.innerHTML = `<div class="error-msg">Connection Error</div>`; }
             },
 
-            async performSubmit(returnResult = false, suppressSuccessModal = false) {
+            async performSubmit(returnRes = false, suppressModal = false) {
                 const q = this.questions[this.currentQId];
                 if (!q) return false;
-
                 const code = CodeEditor.editor.getValue();
                 const btn = document.getElementById('btn-submit');
-
-                // UI Loading State
-                if (btn) {
-                    btn.disabled = true;
-                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
-                }
-
                 try {
+                    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...'; }
                     const res = await API.request('/contest/submit-question', 'POST', {
                         code: code, language: this.allowedLanguage,
                         question_id: q.id, user_id: this.user.participant_id,
                         contest_id: this.activeContestId, level: this.currentLevel
                     });
-
-                    // 1. System Error / Validation Error (400/404/500 from Backend)
-                    if (res.error) {
-                        Toast.show(res.error, "error");
-                        if (returnResult) return false;
-                        return;
-                    }
-
-                    // 2. Verified Result (Success or Incorrect)
-                    if (res.success) {
-                        // PASSED
+                    if (res && res.success) {
                         this.solvedQuestions.add(String(q.id));
                         this.renderTabs();
-                        this.fetchAndApplyState(); // Refresh score/progress
-
+                        this.fetchAndApplyState();
                         this.renderTestResults(res.test_results || [], true, res.warnings);
-
-                        if (!suppressSuccessModal) {
-                            Modal.show("Correct!", "Your solution passed all test cases.", null, 'info');
-                        }
+                        if (!suppressModal) Modal.show("Correct!", "Your solution passed all test cases.", null, 'info');
                         return true;
                     } else {
-                        // FAILED Logic Check
-                        // Backend explicitly sent success=False
                         Toast.show(res.message || "Solution Incorrect", "error");
                         this.renderTestResults(res.test_results || [], true, res.warnings);
                         return false;
                     }
-
                 } catch (e) {
-                    Toast.show("Network/System Error: " + e.message, "error");
+                    Toast.show("Network Error", "error");
                     return false;
                 } finally {
-                    // Restore Button State
                     if (btn) {
                         btn.disabled = false;
                         if (this.currentQId === this.questions.length - 1) {
                             btn.innerHTML = '<i class="fa-solid fa-flag-checkered"></i> Master Submit';
-                            btn.dataset.action = 'master';
-                            btn.style.background = 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)';
                         } else {
                             btn.innerHTML = '<i class="fa-solid fa-cloud-upload"></i> Submit';
-                            btn.dataset.action = 'normal';
-                            btn.style.background = '';
                         }
                     }
                 }
@@ -1397,37 +1093,25 @@
 
             async submitLevel() {
                 try {
-                    // Check if all questions are solved?
-                    // Verify locally first
-                    if (this.solvedQuestions.size < this.questions.length) {
-                        // Although prompt says "partial scores must be finalized", usually Master Submit implies "I am done".
-                        // We will allow it but warn? Or just proceed.
-                        // "Master Submit must finalize the level attempt... persist... score"
-                    }
-
                     const btn = document.getElementById('btn-submit');
                     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Finalizing...'; }
-
                     const res = await API.request('/contest/submit-level', 'POST', {
                         user_id: this.user.participant_id,
                         contest_id: this.activeContestId,
                         level: this.currentLevel
                     });
-
                     if (res.success) {
-                        Modal.show("Level Completed!", "Your score has been recorded. Returning to level selection.", () => {
+                        Modal.show("Level Completed!", "Your score has been recorded.", () => {
                             this.showView('selection');
                             this.fetchAndApplyState();
                         }, 'info');
                     } else {
-                        Toast.show("Error finalizing level: " + res.message, "error");
+                        Toast.show("Error: " + res.message, "error");
                         if (btn) btn.disabled = false;
                     }
                 } catch (e) {
-                    console.error(e);
-                    Toast.show("Network Error during finalization", "error");
-                    const btn = document.getElementById('btn-submit');
-                    if (btn) btn.disabled = false;
+                    Toast.show("Network Error", "error");
+                    if (document.getElementById('btn-submit')) document.getElementById('btn-submit').disabled = false;
                 }
             },
         };
