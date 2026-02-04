@@ -1,0 +1,20 @@
+# Systemd Service Configuration for Debug Marathon
+# Copy this to /etc/systemd/system/debug-marathon.service on each EC2 instance
+
+[Unit]
+Description=Debug Marathon Web Application
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/var/www/debug-marathon/backend
+Environment="PATH=/usr/bin:/usr/local/bin"
+Environment="FLASK_APP=app.py"
+Environment="FLASK_ENV=production"
+ExecStart=/usr/bin/python3 -m gunicorn -w 4 -b 0.0.0.0:5000 app:app
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
