@@ -482,7 +482,7 @@
             async syncContestState() {
                 try {
                     const data = await API.request('/contest');
-                    const active = (data.contests || []).find(c => c.status === 'live');
+                    const active = (data.contests || []).find(c => c.status === 'live' || c.status === 'paused');
                     if (active) this.activeContestId = active.id;
                 } catch (e) { console.error("Sync Error", e); }
             },

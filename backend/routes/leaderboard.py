@@ -24,7 +24,17 @@ def get_leaderboard():
             pls.status,
             pls.start_time, 
             pls.completed_at,
-            TIMESTAMPDIFF(SECOND, pls.start_time, pls.completed_at) as time_taken_sec
+            COALESCE(
+                TIMESTAMPDIFF(SECOND, pls.start_time, pls.completed_at),
+                (SELECT TIMESTAMPDIFF(SECOND, pls.start_time, MAX(s.submission_timestamp)) 
+                 FROM submissions s 
+                 JOIN rounds r ON s.round_id = r.round_id
+                 WHERE s.user_id = pls.user_id 
+                 AND s.contest_id = pls.contest_id 
+                 AND r.round_number = pls.level
+                 AND s.is_correct = 1),
+                0
+            ) as time_taken_sec
         FROM participant_level_stats pls
         JOIN users u ON pls.user_id = u.user_id
         WHERE u.role = 'participant' AND pls.level = %s
@@ -98,7 +108,19 @@ def download_leaderboard_report():
             pls.level_score as total_score,
             pls.questions_solved,
             pls.status,
-            TIMESTAMPDIFF(SECOND, pls.start_time, pls.completed_at) as time_taken_sec
+            pls.start_time, 
+            pls.completed_at,
+            COALESCE(
+                TIMESTAMPDIFF(SECOND, pls.start_time, pls.completed_at),
+                (SELECT TIMESTAMPDIFF(SECOND, pls.start_time, MAX(s.submission_timestamp)) 
+                 FROM submissions s 
+                 JOIN rounds r ON s.round_id = r.round_id
+                 WHERE s.user_id = pls.user_id 
+                 AND s.contest_id = pls.contest_id 
+                 AND r.round_number = pls.level
+                 AND s.is_correct = 1),
+                0
+            ) as time_taken_sec
         FROM participant_level_stats pls
         JOIN users u ON pls.user_id = u.user_id
         WHERE u.role = 'participant' AND pls.level = %s
