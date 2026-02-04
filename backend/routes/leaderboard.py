@@ -26,17 +26,20 @@ def get_leaderboard():
             pls.completed_at,
             COALESCE(
                 TIMESTAMPDIFF(SECOND, pls.start_time, pls.completed_at),
-                (SELECT TIMESTAMPDIFF(SECOND, pls.start_time, MAX(s.submission_timestamp)) 
-                 FROM submissions s 
-                 JOIN rounds r ON s.round_id = r.round_id
-                 WHERE s.user_id = pls.user_id 
-                 AND s.contest_id = pls.contest_id 
-                 AND r.round_number = pls.level
-                 AND s.is_correct = 1),
+                t.last_solve_diff,
                 0
             ) as time_taken_sec
         FROM participant_level_stats pls
         JOIN users u ON pls.user_id = u.user_id
+        LEFT JOIN (
+            SELECT s.user_id, s.contest_id, r.round_number,
+                   TIMESTAMPDIFF(SECOND, MIN(ps_sub.start_time), MAX(s.submission_timestamp)) as last_solve_diff
+            FROM submissions s
+            JOIN rounds r ON s.round_id = r.round_id
+            JOIN participant_level_stats ps_sub ON s.user_id = ps_sub.user_id AND s.contest_id = ps_sub.contest_id AND r.round_number = ps_sub.level
+            WHERE s.is_correct = 1
+            GROUP BY s.user_id, s.contest_id, r.round_number
+        ) t ON pls.user_id = t.user_id AND pls.contest_id = t.contest_id AND pls.level = t.round_number
         WHERE u.role = 'participant' AND pls.level = %s
         ORDER BY pls.level_score DESC, 
                  CASE WHEN pls.status = 'COMPLETED' THEN 0 ELSE 1 END ASC,
@@ -112,17 +115,20 @@ def download_leaderboard_report():
             pls.completed_at,
             COALESCE(
                 TIMESTAMPDIFF(SECOND, pls.start_time, pls.completed_at),
-                (SELECT TIMESTAMPDIFF(SECOND, pls.start_time, MAX(s.submission_timestamp)) 
-                 FROM submissions s 
-                 JOIN rounds r ON s.round_id = r.round_id
-                 WHERE s.user_id = pls.user_id 
-                 AND s.contest_id = pls.contest_id 
-                 AND r.round_number = pls.level
-                 AND s.is_correct = 1),
+                t.last_solve_diff,
                 0
             ) as time_taken_sec
         FROM participant_level_stats pls
         JOIN users u ON pls.user_id = u.user_id
+        LEFT JOIN (
+            SELECT s.user_id, s.contest_id, r.round_number,
+                   TIMESTAMPDIFF(SECOND, MIN(ps_sub.start_time), MAX(s.submission_timestamp)) as last_solve_diff
+            FROM submissions s
+            JOIN rounds r ON s.round_id = r.round_id
+            JOIN participant_level_stats ps_sub ON s.user_id = ps_sub.user_id AND s.contest_id = ps_sub.contest_id AND r.round_number = ps_sub.level
+            WHERE s.is_correct = 1
+            GROUP BY s.user_id, s.contest_id, r.round_number
+        ) t ON pls.user_id = t.user_id AND pls.contest_id = t.contest_id AND pls.level = t.round_number
         WHERE u.role = 'participant' AND pls.level = %s
         ORDER BY pls.level_score DESC, 
                  CASE WHEN pls.status = 'COMPLETED' THEN 0 ELSE 1 END ASC,

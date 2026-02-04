@@ -465,8 +465,21 @@
             userMaxLevel: 1,
             userStatus: 'NOT_STARTED',
             isProctoringActive: false,
-            isThrottled: false,
+            lastStateHash: '',
             allowedLanguage: 'python', // Default
+
+            getStateHash(res) {
+                return JSON.stringify({
+                    level: res.level,
+                    status: res.status,
+                    solved: (res.solved_ids || []).length,
+                    violations: res.violations,
+                    global_level: res.global_level,
+                    results_released: res.results_released,
+                    is_shortlisted_next: res.is_shortlisted_next,
+                    countdown: res.countdown ? res.countdown.active : false
+                });
+            },
 
             async init(user) {
                 console.log("Contest Init Started");
@@ -475,7 +488,7 @@
                 this.showFullscreenRequestOverlay();
                 await this.syncContestState();
                 await this.fetchAndApplyState();
-                setInterval(() => this.fetchAndApplyState(), 3000);
+                setInterval(() => this.fetchAndApplyState(), 6000); // Increased to 6s
                 this.initSocketIO();
             },
 
@@ -495,6 +508,9 @@
                         contest_id: this.activeContestId
                     });
                     if (res && res.success) {
+                        const stateHash = this.getStateHash(res);
+                        if (stateHash === this.lastStateHash) return;
+                        this.lastStateHash = stateHash;
                         if (res.is_eliminated) {
                             this.logout();
                             return;

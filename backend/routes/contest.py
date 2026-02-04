@@ -712,113 +712,93 @@ def get_participant_state():
              if u_res: uid = u_res[0]['user_id']
              else: return jsonify({'error': 'User not found'}), 404
              
-        # Fetch latest level
-        query = "SELECT level, violation_count, questions_solved, start_time, status FROM participant_level_stats WHERE user_id=%s AND contest_id=%s ORDER BY level DESC LIMIT 1"
-        res = db_manager.execute_query(query, (uid, contest_id))
+        # 1. Fetch Participant and Proctoring State in one go
+        state_query = """
+            SELECT 
+                pls.level, pls.violation_count, pls.questions_solved, pls.start_time, pls.status,
+                pp.total_violations, pp.is_disqualified, pp.disqualification_reason
+            FROM participant_level_stats pls
+            LEFT JOIN participant_proctoring pp ON pls.user_id = pp.user_id AND pls.contest_id = pp.contest_id
+            WHERE pls.user_id = %s AND pls.contest_id = %s
+            ORDER BY pls.level DESC LIMIT 1
+        """
+        state_res = db_manager.execute_query(state_query, (uid, contest_id))
+        current_state = state_res[0] if state_res else None
+        
+        # 2. Fetch Global Contest State (Rounds & Admin Flags)
+        # Using a union or multiple keys to minimize queries
+        global_query = """
+            SELECT round_number, status, time_limit_minutes 
+            FROM rounds 
+            WHERE contest_id = %s 
+            ORDER BY round_number ASC
+        """
+        rounds_res = db_manager.execute_query(global_query, (contest_id,))
+        rounds_map = {r['round_number']: r['status'] for r in rounds_res} if rounds_res else {1: 'active'}
+        
+        global_active_level = 1
+        level_duration = 20 # Default
+        
+        for r in rounds_res:
+            if r['status'] == 'active':
+                global_active_level = r['round_number']
+                break
+        
+        # Determine duration for user's current level
+        curr_lvl_num = current_state['level'] if current_state else 1
+        for r in rounds_res:
+            if r['round_number'] == curr_lvl_num:
+                if r['time_limit_minutes'] and r['time_limit_minutes'] > 0:
+                    level_duration = r['time_limit_minutes']
+                break
 
-        # Fetch ALL Round Statuses (Single Source of Truth)
-        rounds_query = "SELECT round_number, status FROM rounds WHERE contest_id=%s ORDER BY round_number ASC"
-        rounds_res = db_manager.execute_query(rounds_query, (contest_id,))
-        rounds_map = {r['round_number']: r['status'] for r in rounds_res} if rounds_res else {}
+        # 3. Fetch Admin State Keys (Released flags, Countdown)
+        admin_keys = [f"contest_{contest_id}_level_{curr_lvl_num}_released", f"contest_{contest_id}_countdown"]
+        admin_res = db_manager.execute_query("SELECT key_name, value FROM admin_state WHERE key_name IN (%s, %s)", (admin_keys[0], admin_keys[1]))
+        admin_map = {r['key_name']: r['value'] for r in admin_res}
         
-        if rounds_map.get(1) == 'pending' or 1 not in rounds_map:
-             rounds_map[1] = 'active'
+        results_released = admin_map.get(admin_keys[0]) == 'true'
+        countdown_data = {'active': False}
+        if admin_map.get(admin_keys[1]):
+            try: countdown_data = json.loads(admin_map[admin_keys[1]])
+            except: pass
 
-        # Fetch Global Active Level
-        gl_query = "SELECT round_number, status FROM rounds WHERE contest_id=%s AND status='active' ORDER BY round_number ASC LIMIT 1"
-        gl_res = db_manager.execute_query(gl_query, (contest_id,))
-        global_active_level = gl_res[0]['round_number'] if gl_res else 1
-        
-        current_state = res[0] if res else None
-        
-        # CLAMP: Ensure user cannot be ahead of the global active round
-        if current_state and current_state['level'] > global_active_level:
-            current_state['level'] = global_active_level
-            # Reset status for this view to avoid confusion
-            current_state['status'] = 'NOT_STARTED' # Force them to 'enter' again if needed
-        
-        # 1. Fetch TOTAL Violations and Disqualification Status using USER_ID (Int)
-        # This matches the source of truth set in proctoring.py
-        total_violations = 0
-        is_disqualified_state = False
-        disq_reason = None
+        # 4. Solved Question IDs (Aggregated)
+        # Could be slow with many submissions, but usually fine for one user
+        s_query = "SELECT CAST(question_id AS CHAR) as qid FROM submissions WHERE user_id=%s AND contest_id=%s AND is_correct=1"
+        s_res = db_manager.execute_query(s_query, (uid, contest_id))
+        solved_ids = [r['qid'] for r in s_res] if s_res else []
 
-        pr_query = "SELECT total_violations, is_disqualified, disqualification_reason FROM participant_proctoring WHERE user_id=%s AND contest_id=%s"
-        p_res = db_manager.execute_query(pr_query, (uid, contest_id))
-        
-        if p_res:
-             total_violations = p_res[0]['total_violations'] if p_res[0]['total_violations'] is not None else 0
-             is_disqualified_state = bool(p_res[0]['is_disqualified'])
-             disq_reason = p_res[0]['disqualification_reason']
+        # 5. Qualification / Disqualification Logic
+        total_violations = current_state['total_violations'] if current_state and current_state['total_violations'] is not None else 0
+        is_disqualified_state = bool(current_state['is_disqualified']) if current_state else False
+        disq_reason = current_state['disqualification_reason'] if current_state else None
 
-        # QUALIFICATION CHECK: 
-        # Only check if not already disqualified via proctoring
+        # Qualification Check
         if not is_disqualified_state and global_active_level > 1:
-            # Check if user is allowed for this level
             q_check = "SELECT is_allowed FROM shortlisted_participants WHERE contest_id=%s AND level=%s AND user_id=%s AND is_allowed=1"
             q_res = db_manager.execute_query(q_check, (contest_id, global_active_level, uid))
-            
             if not q_res:
-                # User is NOT Shortlisted for this Active Level.
-                # However, only disqualify if they have already COMPLETED the previous level or are trying to reach the current global level.
                 if current_state and (current_state['level'] >= global_active_level or (current_state['level'] == global_active_level - 1 and current_state['status'] == 'COMPLETED')):
                     is_disqualified_state = True
                     disq_reason = f"Not selected for Level {global_active_level}"
 
-        # RESTORE: Needed for JSON response
-        global_level_data = {'round_number': global_active_level, 'status': 'active'}
-        
-        cd_key = f"contest_{contest_id}_countdown"
-        cd_res = db_manager.execute_query("SELECT value FROM admin_state WHERE key_name=%s", (cd_key,))
-
-        # 2. Get Duration (With Strict Defaults + Admin Override)
-        def get_default_duration(l):
-            if l <= 3: return 20
-            if l == 4: return 30
-            if l == 5: return 45
-            return 45
-
-        level_duration = get_default_duration(current_state['level'] if current_state else 1)
-        if current_state:
-            lvl = current_state['level']
-            rd_res = db_manager.execute_query("SELECT time_limit_minutes FROM rounds WHERE contest_id=%s AND round_number=%s", (contest_id, lvl))
-            if rd_res and rd_res[0]['time_limit_minutes'] and rd_res[0]['time_limit_minutes'] > 0:
-                 level_duration = rd_res[0]['time_limit_minutes']
-
-        # 3. Decode Countdown State
-        countdown_data = {'active': False}
-        if cd_res:
-             try:
-                 countdown_data = json.loads(cd_res[0]['value'])
-             except: pass
-
-        # 4. Solved Question IDs
-        s_query = "SELECT question_id FROM submissions WHERE user_id=%s AND contest_id=%s AND is_correct=1"
-        s_res = db_manager.execute_query(s_query, (uid, contest_id))
-        solved_ids = [str(r['question_id']) for r in s_res] if s_res else []
-
-        # 5. Format Start Time (Strict UTC with Z to prevent browser drift)
-        def format_utc(dt):
-            if not dt: return None
-            # Ensure it's treated as UTC. 
-            # If the DB returned a naive object, we just add Z.
-            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # 6. Check Results Released State
-        # Logic: If I am in Level 1, and Level 1 Results are released, I need to know if I am in Level 2 Shortlist.
-        current_level_num = current_state['level'] if current_state else 1
-        key = f"contest_{contest_id}_level_{current_level_num}_released"
-        rel_res = db_manager.execute_query("SELECT value FROM admin_state WHERE key_name=%s", (key,))
-        results_released = rel_res and rel_res[0]['value'] == 'true'
-        
         is_shortlisted_next = False
         if results_released:
-            next_lvl = current_level_num + 1
-            # Check if allowed in next level
-            # shortlisted_participants stores "level" as the level they are allowed INTO.
+            next_lvl = curr_lvl_num + 1
             sl_q = "SELECT 1 FROM shortlisted_participants WHERE contest_id=%s AND level=%s AND user_id=%s AND is_allowed=1"
             sl_chk = db_manager.execute_query(sl_q, (contest_id, next_lvl, uid))
             is_shortlisted_next = bool(sl_chk)
+
+        # Handle Clamp
+        if current_state and current_state['level'] > global_active_level:
+            current_state['level'] = global_active_level
+            current_state['status'] = 'NOT_STARTED'
+
+        # Helper for UTC formatting
+        def format_utc(dt):
+            if not dt: return None
+            return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
         return jsonify({
             'success': True,
@@ -829,8 +809,8 @@ def get_participant_state():
             'solved_ids': solved_ids,
             'status': current_state['status'] or 'NOT_STARTED' if current_state else 'NOT_STARTED',
             'start_time': format_utc(current_state['start_time']) if current_state else None,
-            'global_level': global_level_data['round_number'],
-            'global_level_status': global_level_data['status'],
+            'global_level': global_active_level,
+            'global_level_status': rounds_map.get(global_active_level, 'active'),
             'rounds_map': rounds_map,
             'countdown': countdown_data,
             'is_eliminated': is_disqualified_state,
