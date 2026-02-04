@@ -131,6 +131,13 @@ class MySQLManager:
         conn = self.get_connection()
         if not conn: return None
         
+        # --- Simple Caching Check ---
+        # Only cache simple SELECTs without user-specific params if needed, 
+        # but for now, let's keep it safe and just execute.
+        # To add simple caching:
+        # cache_key = f"{query}:{str(params)}"
+        # if cache_key in self._query_cache: return self._query_cache[cache_key]
+
         cursor = conn.cursor(dictionary=True)
         try:
             cursor.execute(query, params or ())
