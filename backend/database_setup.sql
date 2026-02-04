@@ -140,6 +140,7 @@ CREATE TABLE IF NOT EXISTS `submissions` (
   
   PRIMARY KEY (`submission_id`),
   KEY `participant_contest` (`user_id`, `contest_id`),
+  KEY `idx_submissions_perf` (`user_id`, `contest_id`, `round_id`, `is_correct`, `submission_timestamp`),
   CONSTRAINT `fk_sub_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_sub_question` FOREIGN KEY (`question_id`) REFERENCES `questions` (`question_id`) ON DELETE CASCADE,
   CONSTRAINT `fk_sub_round` FOREIGN KEY (`round_id`) REFERENCES `rounds` (`round_id`) ON DELETE CASCADE,
