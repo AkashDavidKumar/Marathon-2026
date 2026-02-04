@@ -1,6 +1,6 @@
 # 🎯 Debug Marathon Platform
 
-A professional, full-stack competitive coding platform featuring a modern landing page, secure contest environment, real-time leaderboard, and comprehensive admin panel.
+A professional, full-stack competitive coding platform featuring a modern landing page, secure contest environment, real-time leaderboard, and comprehensive admin panel. helllo 
 
 ## 🚀 Features
 
