@@ -559,7 +559,31 @@
                 }
             },
 
-            // resolveLevelStatus is fine.
+            resolveLevelStatus(level) {
+                // Safety check
+                if (!this.roundsMap) return 'LOCKED';
+
+                // 1. Check Global Round Status
+                const globalStatus = (this.roundsMap[level] || 'LOCKED').toUpperCase();
+
+                if (globalStatus === 'LOCKED' || globalStatus === 'PENDING') return 'LOCKED';
+                if (globalStatus === 'PAUSED') return 'PAUSED';
+
+                // 2. User Progress Check
+                if (level < this.userMaxLevel) {
+                    return 'COMPLETED';
+                }
+
+                if (level === this.userMaxLevel) {
+                    // If user completed this level?
+                    if (this.userStatus === 'COMPLETED') return 'COMPLETED';
+                    // If user is currently playing this level or it's next up
+                    return 'ACTIVE';
+                }
+
+                // level > userMaxLevel
+                return 'LOCKED';
+            },
 
             buildLevelCard(level, status) {
                 const styles = {
