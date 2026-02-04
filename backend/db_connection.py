@@ -116,6 +116,13 @@ class MySQLManager:
         try:
             conn = self.pool.get_connection()
             if conn.is_connected():
+                # Aggressive ping to ensure connection in multi-AZ/multi-server environment
+                try:
+                    conn.ping(reconnect=True, attempts=3, delay=1)
+                except Error:
+                    # If ping fails, force a new connection if possible or retry
+                    logger.warning("Connection ping failed, attempting reconnect...")
+                    conn.reconnect(attempts=3, delay=2)
                 return conn
             else:
                 try:
