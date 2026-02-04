@@ -1,0 +1,1308 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Participant Portal - Giltch Fix</title>
+
+    <!-- CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/dashboard.css">
+    <link rel="stylesheet" href="css/modern-forms.css">
+</head>
+
+<body>
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Proctoring Overlay -->
+    <div id="proctor-overlay" class="proctor-overlay" style="display: none;">
+        <i class="fa-solid fa-triangle-exclamation proctor-icon"></i>
+        <div class="proctor-alert">
+            <h2>Tab Switch Detected!</h2>
+            <p>You have left the contest window. This has been recorded as a violation.</p>
+        </div>
+        <button class="btn btn-primary" onclick="Proctoring.dismissOverlay()"
+            style="margin-top: 2rem; border: 1px solid white;">Return to Contest</button>
+    </div>
+
+    <!-- Start Level Overlay -->
+    <div id="level-start-overlay" class="proctor-overlay"
+        style="display: none; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(15px); z-index: 3000;">
+        <div class="proctor-alert"
+            style="background: white; color: black; padding: 3rem; border-radius: 20px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);">
+            <i class="fa-solid fa-play-circle"
+                style="font-size: 4rem; color: var(--primary-600); margin-bottom: 1.5rem;"></i>
+            <h2 style="font-family: 'Poppins', sans-serif; font-weight: 800; margin-bottom: 1rem;">READY TO START?</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 2rem; max-width: 400px; line-height: 1.6;">
+                Clicking start will begin the timer for this level.
+                <br><br>
+                <strong>Strict Proctoring is Active:</strong><br>
+                <span class="badge badge-error">No Tab Switching</span>
+                <span class="badge badge-error">No Copy/Paste</span>
+                <span class="badge badge-error">No Screenshots</span>
+            </p>
+            <button class="btn btn-primary" onclick="Contest.startLevel()"
+                style="padding: 1rem 3rem; font-size: 1.2rem; border-radius: 50px; width: 100%;">
+                Start Level Now
+            </button>
+        </div>
+    </div>
+
+    <!-- Fullscreen Request Overlay -->
+    <div id="fs-request-overlay" class="proctor-overlay" style="display: none; background: #0f172a; z-index: 9999;">
+        <div class="proctor-alert" style="text-align:center;">
+            <i class="fa-solid fa-expand" style="font-size: 3rem; margin-bottom: 1rem;"></i>
+            <h2>Enter Contest Environment</h2>
+            <p>Fullscreen is required to participate.</p>
+            <button class="btn btn-primary" onclick="Contest.enterSessionFullscreen()">Enter Fullscreen</button>
+        </div>
+    </div>
+
+    <!-- Fullscreen Exit Blocking Overlay -->
+    <div id="fs-exit-overlay" class="proctor-overlay"
+        style="display: none; background: rgba(0,0,0,0.95); z-index: 10000;">
+        <div class="proctor-alert" style="text-align:center; border: 1px solid red;">
+            <i class="fa-solid fa-triangle-exclamation" style="font-size: 3rem; color: red; margin-bottom: 1rem;"></i>
+            <h2>Fullscreen Required</h2>
+            <p>You exited fullscreen mode. Please return to continue.</p>
+            <button class="btn btn-danger" onclick="Contest.enterSessionFullscreen()">Return to Fullscreen</button>
+        </div>
+    </div>
+
+    <!-- Countdown Overlay -->
+    <div id="countdown-overlay" class="proctor-overlay"
+        style="display: none; background: #0f172a; z-index: 20000; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+
+        <div style="margin-bottom: 2rem;">
+            <i class="fa-solid fa-hourglass-half"
+                style="font-size: 4rem; color: #f59e0b; animation: pulse 2s infinite;"></i>
+        </div>
+
+        <h1 style="font-size: 3rem; font-weight: 800; color: white; margin-bottom: 1rem;">NEXT LEVEL LOADING</h1>
+        <p style="color: #94a3b8; font-size: 1.2rem; max-width: 600px; margin-bottom: 3rem;">
+            Qualifying participants are being selected. The next level will begin shortly.
+        </p>
+
+        <div class="timer-display"
+            style="font-family: 'Fira Code', monospace; font-size: 5rem; font-weight: 700; color: #f59e0b; background: rgba(255,255,255,0.05); padding: 1rem 3rem; border-radius: 1rem; border: 2px solid #f59e0b;">
+            00:00
+        </div>
+
+        <div id="countdown-target-msg" style="margin-top: 2rem; color: #64748b; font-weight: 600;"></div>
+    </div>
+
+    <style>
+        .blurred-bg {
+            filter: blur(15px);
+            pointer-events: none;
+            transition: filter 0.5s ease;
+        }
+
+        /* Security Blur for Violations */
+        body.security-blur #game-ui-wrapper,
+        body.security-blur .editor-panel,
+        body.security-blur .question-panel {
+            filter: blur(20px);
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .violation-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: #10b981;
+            /* Default/Safe Green */
+            color: white;
+            transition: all 0.3s;
+        }
+
+        .violation-badge.warning {
+            background: #f59e0b;
+        }
+
+        .violation-badge.danger {
+            background: #ef4444;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .q-tabs {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            gap: 10px !important;
+            padding: 10px 15px !important;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            align-items: center;
+        }
+
+        .q-tab {
+            padding: 8px 16px;
+            background: white;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            color: #64748b;
+            transition: all 0.2s ease;
+            text-align: center;
+            min-width: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Inter', sans-serif;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .q-tab:hover {
+            border-color: var(--primary-500);
+            color: var(--primary-600);
+            transform: translateY(-1px);
+        }
+
+        .q-tab.active {
+            background: var(--primary-600);
+            color: white;
+            border-color: var(--primary-600);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .q-tab.solved {
+            border-color: #10b981;
+            color: #10b981;
+        }
+
+        .q-tab.active.solved {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
+
+    <!-- Socket.IO -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <!-- LOGIN SECTION -->
+    <section id="login-section"
+        style="background: #e2e8f0; background-image: radial-gradient(#cbd5e1 1px, transparent 1px); background-size: 24px 24px;">
+        <div class="login-card fade-in" style="width: 100%; max-width: 400px; text-align: center;">
+            <div class="login-logo">
+                <i class="fa-solid fa-code-branch"></i> Giltch Fix
+            </div>
+            <h2 style="margin-bottom: 0.5rem; font-weight: 800; color: #1e293b;">Welcome Participant</h2>
+            <p style="color: #64748b; margin-bottom: 2rem;">Enter your ID to start the contest</p>
+
+            <form id="login-form">
+                <div style="margin-bottom: 1.5rem;">
+                    <input type="text" id="participant-id" class="input" placeholder="Participant ID (e.g. PART001)"
+                        required>
+                </div>
+                <button type="submit" class="btn btn-primary"
+                    style="width: 100%; padding: 1rem !important; font-size: 1.1rem !important;">Enter Contest</button>
+            </form>
+
+            <div style="margin-top: var(--space-4);">
+                <a href="index.html" style="color: var(--primary-500); font-size: 0.875rem;">Back to Home</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- LEVEL SELECTION SECTION -->
+    <section id="level-selection-section"
+        style="display: none; min-height: 100vh; padding: 2rem; max-width: 1200px; margin: 0 auto;">
+        <div class="dash-header" style="margin-bottom: 3rem; background: transparent; padding: 0;">
+            <div>
+                <h1 style="color: #1e293b; margin:0; font-size: 2rem; font-weight: 800; text-align: center;">Select
+                    Level</h1>
+                <p style="color: #64748b; margin-top: 0.5rem; text-align: center;">Choose your current stage to proceed
+                </p>
+            </div>
+            <div style="position: absolute; top: 2rem; right: 2rem;">
+                <button class="btn" onclick="Contest.logout()" style="color: #64748b; font-weight: 600;">
+                    <i class="fa-solid fa-right-from-bracket"></i> Logout
+                </button>
+            </div>
+        </div>
+
+        <div id="level-selection-grid"
+            style="display: flex; flex-wrap: wrap; justify-content: center; gap: 1.5rem; max-width: 900px; margin: 3rem auto 0 auto; padding-top: 2rem;">
+            <!-- Generated by JS -->
+        </div>
+    </section>
+
+    <!-- GAME UI WRAPPER -->
+    <div id="game-ui-wrapper" style="display: none;">
+        <header class="dash-header">
+            <div style="display: flex; align-items: center; gap: var(--space-4);">
+                <div class="nav-logo" style="font-size: 1.25rem;">Giltch Fix</div>
+                <span class="badge badge-success" id="connection-status">Live</span>
+            </div>
+            <div class="timer-box" id="contest-timer">00:00:00</div>
+            <div style="display: flex; align-items: center; gap: var(--space-4);">
+                <div class="violation-badge" id="violation-count">0 Violations</div>
+                <button class="btn btn-secondary" onclick="Contest.logout()"
+                    style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Exit</button>
+            </div>
+        </header>
+
+        <div id="dashboard-container" class="dashboard-container">
+            <aside class="question-panel">
+                <div class="level-indicator"
+                    style="padding: var(--space-4); border-bottom: 1px solid var(--border-light); background: var(--gray-50);">
+                    <div
+                        style="font-size: 0.75rem; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; margin-bottom: 0.5rem; letter-spacing: 0.05em;">
+                        Contest Roadmap
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                        <span id="level-1" class="level-badge active">Lvl 1</span>
+                        <i class="fa-solid fa-chevron-right" style="font-size: 0.7rem; color: var(--gray-300);"></i>
+                        <span id="level-2" class="level-badge locked">Lvl 2</span>
+                        <i class="fa-solid fa-chevron-right" style="font-size: 0.7rem; color: var(--gray-300);"></i>
+                        <span id="level-3" class="level-badge locked">Lvl 3</span>
+                        <i class="fa-solid fa-chevron-right" style="font-size: 0.7rem; color: var(--gray-300);"></i>
+                        <span id="level-4" class="level-badge locked">Lvl 4</span>
+                        <i class="fa-solid fa-chevron-right" style="font-size: 0.7rem; color: var(--gray-300);"></i>
+                        <span id="level-5" class="level-badge locked">Lvl 5</span>
+                    </div>
+                    <div style="margin-top: 0.75rem; font-size: 0.875rem; font-weight: 600; color: var(--primary-700);">
+                        Current Level: <span id="current-level-display">Level 1</span>
+                    </div>
+                </div>
+
+                <div style="padding: 10px; background:white; text-align:center; border-bottom:1px solid #eee;">
+                    <button class="btn btn-sm btn-secondary" onclick="Contest.showView('selection')" style="width:100%">
+                        <i class="fa-solid fa-arrow-left"></i> Back to Levels
+                    </button>
+                </div>
+
+                <div class="q-tabs"></div>
+
+                <div class="q-content">
+                    <div id="q-details"><span class="q-badge easy">Level 1</span></div>
+                    <div class="test-cases-box"></div>
+                </div>
+            </aside>
+
+            <main class="editor-panel">
+                <div class="editor-toolbar">
+                    <div class="toolbar-group">
+                        <span class="badge badge-gray" id="lang-display" style="font-family: monospace;">Python 3</span>
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.85rem;"
+                            onclick="CodeEditor.editor.setFontSize(parseInt(CodeEditor.editor.getFontSize()) + 1)">A+</button>
+                        <button class="btn" style="padding: 4px 8px; font-size: 0.85rem;"
+                            onclick="CodeEditor.editor.setFontSize(parseInt(CodeEditor.editor.getFontSize()) - 1)">A-</button>
+                    </div>
+                    <div class="toolbar-group">
+                        <button class="btn btn-primary" onclick="Contest.runCode()" id="btn-run"
+                            style="background-color: var(--success); border: none;">
+                            <i class="fa-solid fa-play" style="margin-right: 6px;"></i> Run
+                        </button>
+                        <button class="btn btn-primary" onclick="Contest.handleToolbarSubmit()" id="btn-submit"
+                            style="background: var(--primary-600); border: none; font-weight: 700; padding: 6px 20px;">
+                            <i class="fa-solid fa-cloud-upload" style="margin-right: 6px;"></i> Submit
+                        </button>
+                    </div>
+                </div>
+                <div id="ace-editor"></div>
+                <div class="output-panel">
+                    <div class="output-header">
+                        <strong>Console / Output</strong>
+                        <span style="font-size: 0.75rem; color: var(--text-secondary);">Execution Time: <span
+                                id="exec-time">-</span></span>
+                    </div>
+                    <div id="console-output" class="console-logs">Ready to execute...</div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Custom Modal -->
+    <div id="custom-modal" class="proctor-overlay" style="display: none; z-index: 10001;">
+        <div class="proctor-alert" style="background: white; color: #1e293b; max-width: 400px; padding: 2rem;">
+            <i class="fa-solid fa-circle-info" id="modal-icon"
+                style="font-size: 3rem; color: var(--primary-600); margin-bottom: 1rem;"></i>
+            <h3 id="modal-title" style="margin-bottom: 0.5rem;">Title</h3>
+            <div id="modal-body" style="margin-bottom: 1.5rem; color: #64748b;">Body text</div>
+            <div style="display: flex; gap: 1rem; justify-content: center;" id="modal-actions">
+                <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                <button class="btn btn-primary" onclick="Modal.confirmAction()">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SELECTION NOTIFICATION OVERLAYS -->
+    <div id="selected-overlay" class="proctor-overlay"
+        style="display: none; background: rgba(16, 185, 129, 0.96); z-index: 30000; flex-direction: column; text-align: center;">
+        <i class="fa-solid fa-trophy"
+            style="font-size: 5rem; color: #fbbf24; margin-bottom: 2rem; animation: float 3s ease-in-out infinite;"></i>
+        <h1 style="font-size: 3rem; font-weight: 800; color: white; margin-bottom: 1rem;">CONGRATULATIONS!</h1>
+        <p style="color: white; font-size: 1.5rem; max-width: 600px; margin-bottom: 2rem;">
+            🎉 You’re selected for the next level!
+            <br><span style="font-size: 1.1rem; opacity: 0.9; display:block; margin-top:1rem; font-weight: 500;">Please
+                wait while we prepare the next round...</span>
+        </p>
+        <div style="color: white; font-size: 2rem;"><i class="fa-solid fa-spinner fa-spin"></i></div>
+    </div>
+
+    <div id="unselected-overlay" class="proctor-overlay"
+        style="display: none; background: rgba(15, 23, 42, 0.98); z-index: 30000; flex-direction: column; text-align: center;">
+        <i class="fa-solid fa-handshake-simple" style="font-size: 5rem; color: #64748b; margin-bottom: 2rem;"></i>
+        <h1 style="font-size: 2.5rem; font-weight: 800; color: white; margin-bottom: 1rem;">Thank You!</h1>
+        <p style="color: #cbd5e1; font-size: 1.25rem; max-width: 600px; margin-bottom: 3rem; line-height: 1.6;">
+            🙏 You have completed your journey in this contest.
+            <br>We appreciate your participation and effort!
+        </p>
+        <button class="btn btn-primary" onclick="window.location.href='index.html'"
+            style="padding: 1rem 3rem; font-size: 1.1rem; background: white; color: #0f172a; border: none; font-weight: 700; border-radius: 50px; box-shadow: 0 10px 25px -5px rgba(255, 255, 255, 0.3);">
+            <i class="fa-solid fa-house" style="margin-right: 8px;"></i> Go to Home
+        </button>
+    </div>
+
+    <style>
+        @keyframes float {
+            0% {
+                transform: translateY(0px);
+            }
+
+            50% {
+                transform: translateY(-20px);
+            }
+
+            100% {
+                transform: translateY(0px);
+            }
+        }
+    </style>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ext-language_tools.min.js"></script>
+    <script src="js/main.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/proctoring.js"></script>
+    <script src="js/editor.js"></script>
+    <script src="js/auth.js"></script>
+
+    <script>
+        const Modal = {
+            confirmCallback: null,
+
+            show(title, body, onConfirm, type = 'confirm') {
+                document.getElementById('modal-title').innerText = title;
+                document.getElementById('modal-body').innerHTML = body;
+                document.getElementById('custom-modal').style.display = 'flex';
+
+                const icon = document.getElementById('modal-icon');
+                const actions = document.getElementById('modal-actions');
+
+                this.confirmCallback = onConfirm;
+
+                if (type === 'error') {
+                    icon.className = 'fa-solid fa-circle-xmark';
+                    icon.style.color = '#ef4444';
+                    actions.innerHTML = '<button class="btn btn-primary" onclick="Modal.close()">Close</button>';
+                } else if (type === 'info') {
+                    icon.className = 'fa-solid fa-circle-info';
+                    icon.style.color = '#3b82f6';
+                    actions.innerHTML = '<button class="btn btn-primary" onclick="Modal.close()">OK</button>';
+                } else {
+                    icon.className = 'fa-solid fa-circle-question';
+                    icon.style.color = '#f59e0b';
+                    actions.innerHTML = `
+                        <button class="btn btn-secondary" onclick="Modal.close()">Cancel</button>
+                        <button class="btn btn-primary" onclick="Modal.confirmAction()">Confirm</button>
+                    `;
+                }
+            },
+
+            close() {
+                document.getElementById('custom-modal').style.display = 'none';
+                this.confirmCallback = null;
+            },
+
+            confirmAction() {
+                if (this.confirmCallback) this.confirmCallback();
+                this.close();
+            }
+        };
+
+        window.Contest = {
+            questions: [],
+            currentQId: 0,
+            solvedQuestions: new Set(),
+            currentLevel: 1,
+            activeContestId: null,
+            timerInterval: null,
+            levelStartTime: null,
+            levelDuration: 30,
+            user: null,
+            roundsMap: {},
+            userMaxLevel: 1,
+            userStatus: 'NOT_STARTED',
+            isProctoringActive: false,
+            isThrottled: false,
+            allowedLanguage: 'python', // Default
+
+            async init(user) {
+                console.log("Contest Init Started");
+                this.user = user;
+                if (window.CodeEditor) CodeEditor.init('ace-editor');
+                this.showFullscreenRequestOverlay();
+                await this.syncContestState();
+                await this.fetchAndApplyState();
+                setInterval(() => this.fetchAndApplyState(), 3000);
+                this.initSocketIO();
+            },
+
+            async syncContestState() {
+                try {
+                    const data = await API.request('/contest');
+                    const active = (data.contests || []).find(c => c.status === 'live');
+                    if (active) this.activeContestId = active.id;
+                } catch (e) { console.error("Sync Error", e); }
+            },
+
+            async fetchAndApplyState() {
+                try {
+                    if (!this.user || !this.activeContestId) return;
+                    const res = await API.request('/contest/participant-state', 'POST', {
+                        user_id: this.user.participant_id,
+                        contest_id: this.activeContestId
+                    });
+                    if (res && res.success) {
+                        if (res.is_eliminated) {
+                            this.logout();
+                            return;
+                        }
+                        this.userMaxLevel = res.level || 1;
+                        this.userStatus = res.status || 'NOT_STARTED';
+                        this.roundsMap = res.rounds_map || {};
+                        if (res.start_time) {
+                            this.levelStartTime = res.start_time;
+                            this.levelDuration = res.level_duration_minutes || 45;
+                            this.startTimer();
+                        }
+                        this.solvedQuestions = new Set(res.solved_ids || []);
+                        if (window.Proctoring) {
+                            window.Proctoring.violations = res.violations || 0;
+                            window.Proctoring.updateBadge();
+                            if (res.violations > 20) {
+                                this.logout();
+                            }
+                        }
+                        if (res.countdown) {
+                            this.handleCountdown(res.countdown);
+                        }
+                        this.renderLevelSelection();
+                        this.updateRoadmapUI(); // Ensure top roadmap stays in sync
+
+                        // ---------------- NEW NOTIFICATION LOGIC ----------------
+                        const selOverlay = document.getElementById('selected-overlay');
+                        const unselOverlay = document.getElementById('unselected-overlay');
+
+                        if (!selOverlay || !unselOverlay) return;
+
+                        // FIX: Get authoritative status of the current level
+                        const currentLvl = res.level || 1;
+                        const levelStatusFromMap = (res.rounds_map && res.rounds_map[currentLvl]) ? res.rounds_map[currentLvl] : 'pending';
+
+                        // Show overlays only if:
+                        // 1. User is NOT inside the level (IN_PROGRESS)
+                        // 2. Admin explicitly released results
+                        // 3. The level itself is COMPLETED (prevents premature showing during active level)
+                        if (this.userStatus !== 'IN_PROGRESS' && res.results_released && levelStatusFromMap === 'completed') {
+                            if (res.is_shortlisted_next) {
+                                unselOverlay.style.display = 'none';
+                                selOverlay.style.display = 'flex';
+
+                                // Check if global level has advanced (Level Started)
+                                if (res.global_level > this.userMaxLevel) {
+                                    // Update overlay to show Enter button if not already showing
+                                    if (!document.getElementById('btn-enter-next')) {
+                                        selOverlay.innerHTML = `
+                                            <i class="fa-solid fa-rocket" style="font-size: 5rem; color: #3b82f6; margin-bottom: 2rem; animation: bounce 1s infinite;"></i>
+                                            <h1 style="font-size: 3rem; font-weight: 800; color: white; margin-bottom: 1rem;">LEVEL ${res.global_level} STARTED!</h1>
+                                            <p style="color:white; font-size:1.2rem; margin-bottom:2rem;">The round is live. Good luck!</p>
+                                            <button id="btn-enter-next" class="btn btn-primary" onclick="Contest.handleLevelClick(${res.global_level}); document.getElementById('selected-overlay').style.display='none';"
+                                                style="padding: 1rem 3rem; font-size: 1.5rem; border-radius: 50px; box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);">
+                                                ENTER NOW
+                                            </button>
+                                        `;
+                                    }
+                                }
+                            } else {
+                                // Not Selected
+                                selOverlay.style.display = 'none';
+                                unselOverlay.style.display = 'flex';
+                            }
+                        } else {
+                            // Hide overlays if logic doesn't apply
+                            selOverlay.style.display = 'none';
+                            unselOverlay.style.display = 'none';
+                        }
+                        // --------------------------------------------------------
+                    }
+                } catch (e) { console.error("Fetch State Error", e); }
+            },
+
+            startTimer() {
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                const update = () => {
+                    const timerEl = document.getElementById('contest-timer');
+                    if (!timerEl) return;
+
+                    if (!this.levelStartTime) {
+                        timerEl.innerText = "00:00:00";
+                        return;
+                    }
+
+                    // Use UTC absolute comparison
+                    const now = new Date();
+                    let startStr = this.levelStartTime;
+
+                    if (!startStr.endsWith('Z') && !startStr.includes('+')) {
+                        startStr += 'Z';
+                    }
+
+                    const startT = new Date(startStr);
+                    if (isNaN(startT.getTime())) {
+                        timerEl.innerText = "--:--:--";
+                        return;
+                    }
+
+                    const endsAt = new Date(startT.getTime() + (this.levelDuration * 60000));
+                    const diff = endsAt.getTime() - now.getTime();
+
+                    if (diff <= 0) {
+                        timerEl.innerText = "00:00:00";
+                        timerEl.classList.add('danger');
+                        return;
+                    }
+
+                    const h = Math.floor(diff / 3600000);
+                    const m = Math.floor((diff % 3600000) / 60000);
+                    const s = Math.floor((diff % 60000) / 1000);
+
+                    timerEl.innerText = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+                    if (diff < 300000) timerEl.classList.add('warning'); // 5 mins left
+                    else timerEl.classList.remove('warning', 'danger');
+                };
+                update();
+                this.timerInterval = setInterval(update, 1000);
+            },
+
+            renderLevelSelection() {
+                const grid = document.getElementById('level-selection-grid');
+                if (!grid) return;
+                let html = '';
+                for (let i = 1; i <= 5; i++) {
+                    const status = this.resolveLevelStatus(i);
+                    html += this.buildLevelCard(i, status);
+                }
+                grid.innerHTML = html;
+            },
+
+            resolveLevelStatus(level) {
+                const gStatus = this.roundsMap[level] || 'pending';
+                if (gStatus === 'completed') return 'COMPLETED';
+                // Successive levels logic
+                if (level < this.userMaxLevel) return 'COMPLETED';
+                if (level === this.userMaxLevel && this.userStatus === 'COMPLETED') return 'COMPLETED';
+                if (gStatus === 'active') return 'ACTIVE';
+                if (gStatus === 'paused') return 'PAUSED';
+                if (level === 1) return 'ACTIVE';
+                return 'LOCKED';
+            },
+
+            buildLevelCard(level, status) {
+                const styles = {
+                    'COMPLETED': 'background: #10b981; color: white;',
+                    'LOCKED': 'background: #f1f5f9; color: #94a3b8; border: 1px solid #e2e8f0; cursor: not-allowed;',
+                    'ACTIVE': 'background: #3b82f6; color: white; cursor: pointer; transform: scale(1.02); box-shadow: 0 10px 25px -5px rgba(59, 130, 246, 0.5);',
+                    'PAUSED': 'background: #64748b; color: white; cursor: not-allowed;'
+                };
+                const icons = { 'COMPLETED': 'fa-check-circle', 'LOCKED': 'fa-lock', 'ACTIVE': 'fa-play', 'PAUSED': 'fa-pause' };
+                const btnHtml = status === 'ACTIVE' ? `<div class="enter-btn-label" style="margin-top:1rem; background:white; color:#3b82f6; padding:0.4rem 1rem; border-radius:2rem; font-weight:700; font-size:0.7rem;">ENTER</div>` : '';
+
+                return `
+                <div class="level-card-item" onclick="Contest.handleLevelClick(${level})" style="border-radius: 1rem; padding: 1.5rem; width: 200px; display: flex; flex-direction: column; align-items: center; text-align: center; transition: all 0.3s ease; ${styles[status] || styles['LOCKED']}">
+                    <div style="font-size: 2.5rem; margin-bottom: 0.75rem;"><i class="fa-solid ${icons[status]}"></i></div>
+                    <h2 style="margin: 0; font-size: 1.2rem; font-weight: 700;">Level ${level}</h2>
+                    <p style="margin-top: 0.25rem; opacity: 0.9; font-weight: 500; font-size: 0.8rem;">${status}</p>
+                    ${btnHtml}
+                </div>`;
+            },
+
+            async handleLevelClick(level) {
+                const status = this.resolveLevelStatus(level);
+                if (status === 'LOCKED' || status === 'COMPLETED' || status === 'PAUSED') return;
+
+                this.currentLevel = level;
+                // If already in progress, enter directly. Else show start overlay.
+                if (this.currentLevel === this.userMaxLevel && this.userStatus === 'IN_PROGRESS') {
+                    this.enterLevel(level);
+                } else {
+                    const overlay = document.getElementById('level-start-overlay');
+                    if (overlay) overlay.style.display = 'flex';
+                }
+            },
+
+            async startLevel() {
+                try {
+                    const res = await API.request('/contest/start-level', 'POST', {
+                        user_id: this.user.participant_id,
+                        contest_id: this.activeContestId,
+                        level: this.currentLevel
+                    });
+                    if (res && res.success) {
+                        document.getElementById('level-start-overlay').style.display = 'none';
+                        this.levelStartTime = res.start_time;
+                        this.levelDuration = res.level_duration_minutes;
+                        this.startTimer();
+                        this.enterLevel(this.currentLevel);
+                    }
+                } catch (e) {
+                    console.error("Start level error", e);
+                    Toast.show("Failed to start level. Contact admin.", "error");
+                }
+            },
+
+            enterLevel(level) {
+                this.currentLevel = level;
+                this.isProctoringActive = true;
+
+                if (window.Proctoring) {
+                    Proctoring.reset();
+                    Proctoring.levelActive = true;
+                    this.bindProctoringEvents();
+                }
+
+                const lbl = document.getElementById('current-level-display');
+                if (lbl) lbl.innerText = `Level ${level}`;
+
+                this.showView('editor');
+                this.fetchAndApplyState().then(() => {
+                    this.updateRoadmapUI();
+                });
+
+                // Resize editor
+                if (window.CodeEditor && CodeEditor.editor) setTimeout(() => CodeEditor.editor.resize(), 100);
+                this.loadQuestionsForLevel();
+            },
+
+            updateRoadmapUI() {
+                for (let i = 1; i <= 5; i++) {
+                    const badge = document.getElementById(`level-${i}`);
+                    if (!badge) continue;
+
+                    badge.className = 'level-badge';
+                    const status = this.resolveLevelStatus(i);
+
+                    if (i === this.currentLevel) {
+                        badge.classList.add('active');
+                        badge.innerHTML = `Lvl ${i}`;
+                    } else if (status === 'COMPLETED') {
+                        badge.classList.add('completed');
+                        badge.innerHTML = `Lvl ${i} <i class="fa-solid fa-check"></i>`;
+                    } else if (status === 'LOCKED') {
+                        badge.classList.add('locked');
+                    } else {
+                        badge.classList.add('pending');
+                    }
+                }
+            },
+
+            showView(v) {
+                document.getElementById('level-selection-section').style.display = v === 'selection' ? 'block' : 'none';
+                document.getElementById('game-ui-wrapper').style.display = v === 'editor' ? 'block' : 'none';
+                document.getElementById('login-section').style.display = v === 'login' ? 'flex' : 'none';
+            },
+
+            enterSessionFullscreen() {
+                document.documentElement.requestFullscreen().then(() => {
+                    document.getElementById('fs-request-overlay').style.display = 'none';
+                    document.getElementById('fs-exit-overlay').style.display = 'none';
+                    if (this.isProctoringActive) this.showView('editor');
+                    else this.showView('selection');
+                }).catch(() => Toast.show("Fullscreen required to continue.", "error"));
+            },
+
+            showFullscreenRequestOverlay() {
+                document.getElementById('fs-request-overlay').style.display = 'flex';
+                // Don't hide level selection - keep it visible behind the overlay
+                document.getElementById('game-ui-wrapper').style.display = 'none';
+                document.getElementById('login-section').style.display = 'none';
+            },
+
+            showFullscreenExitOverlay() { document.getElementById('fs-exit-overlay').style.display = 'flex'; },
+
+            logout() {
+                if (document.fullscreenElement) document.exitFullscreen().catch(() => { });
+                Storage.remove('session');
+                window.location.href = 'index.html';
+            },
+
+            bindProctoringEvents() {
+                if (this._eventsBound) return;
+                this._eventsBound = true;
+                if (window.Proctoring) {
+                    if (!Proctoring.isActive) Proctoring.init(this.activeContestId);
+                    Proctoring.levelActive = true;
+                }
+            },
+
+            async loadQuestionsForLevel() {
+                const tabs = document.querySelector('.q-tabs');
+                if (!tabs) return;
+                tabs.innerHTML = '<div class="loading-spinner">Loading Questions...</div>';
+
+                try {
+                    const data = await API.request(`/contest/questions?contest_id=${this.activeContestId}&level=${this.currentLevel}`);
+                    if (!data || !data.questions || data.questions.length === 0) {
+                        tabs.innerHTML = `<div class="error-msg">No questions found for Level ${this.currentLevel}</div>`;
+                        return;
+                    }
+
+                    // Strict Language Enforcement
+                    this.allowedLanguage = (data.allowed_language || 'python').toLowerCase();
+                    const langMap = { 'c': 'C (GCC)', 'cpp': 'C++', 'python': 'Python 3', 'java': 'Java', 'javascript': 'JavaScript' };
+                    document.getElementById('lang-display').innerText = langMap[this.allowedLanguage] || 'Python 3';
+
+                    // Set Editor Mode strictly
+                    if (window.CodeEditor) {
+                        CodeEditor.setLanguage(this.allowedLanguage);
+                    }
+
+                    this.questions = data.questions; // Expecting sorted from backend
+                    this.renderTabs();
+                    this.switchQuestion(0);
+                } catch (e) {
+                    console.error("Load Questions Failed", e);
+                    tabs.innerHTML = `<div class="error-msg">Failed to load. <button onclick="Contest.loadQuestionsForLevel()" class="btn btn-xs">Retry</button></div>`;
+                }
+            },
+
+            renderTabs() {
+                const tabs = document.querySelector('.q-tabs');
+                // Questions should be already sorted by backend
+                tabs.innerHTML = this.questions.map((q, i) => `
+                    <div class="q-tab ${i === this.currentQId ? 'active' : ''} ${this.solvedQuestions.has(String(q.id)) ? 'solved' : ''}" onclick="Contest.switchQuestion(${i})">
+                        Q${i + 1} ${this.solvedQuestions.has(String(q.id)) ? '✓' : ''}
+                    </div>`).join('');
+            },
+
+            switchQuestion(idx) {
+                if (!this.questions || this.questions.length === 0) {
+                    console.warn("No questions to switch to");
+                    return;
+                }
+                this.currentQId = idx;
+                this.renderTabs();
+                const q = this.questions[idx];
+                if (!q) return;
+
+                const detail = document.getElementById('q-details');
+
+                const expInput = "Hidden"; // Enforce Hiding Input
+                const expOutput = q.expected_output || (q.test_cases && q.test_cases.length > 0 ? q.test_cases[0].expected : "Hidden");
+
+                if (detail) {
+                    detail.innerHTML = `
+                        <div class="q-header">
+                            <span class="q-badge ${q.difficulty.toLowerCase()}">${q.difficulty}</span>
+                            <h3>${q.title}</h3>
+                        </div>
+                        <div class="q-body">${q.description}</div>
+                        
+                        <div style="margin-top: 1.5rem; padding: 1rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+                            <h4 style="margin:0 0 0.5rem 0; font-size:0.9rem; color:#475569;">Sample Case</h4>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div>
+                                    <div style="font-size:0.75rem; font-weight:600; color:#64748b; margin-bottom:4px;">Input</div>
+                                    <pre style="background:white; padding:0.5rem; border-radius:4px; border:1px solid #e2e8f0; font-size:0.8rem; margin:0; white-space:pre-wrap; color: #94a3b8; font-style: italic;">[Input Injected Automatically]</pre>
+                                </div>
+                                <div>
+                                    <div style="font-size:0.75rem; font-weight:600; color:#64748b; margin-bottom:4px;">Expected Output</div>
+                                    <pre style="background:white; padding:0.5rem; border-radius:4px; border:1px solid #e2e8f0; font-size:0.8rem; margin:0; white-space:pre-wrap;">${expOutput}</pre>
+                                </div>
+                            </div>
+                        </div>
+                     `;
+                }
+
+                // Set boilerplate
+                CodeEditor.editor.setValue(q.buggy_code || q.boilerplate?.python || "", -1);
+
+                // Update Submit Button State
+                const btn = document.getElementById('btn-submit');
+                if (btn) {
+                    // Disable by default until run passes
+                    btn.classList.add('btn-disabled');
+                    btn.disabled = true;
+
+                    // Check if Last Question
+                    if (idx === this.questions.length - 1) {
+                        btn.innerHTML = '<i class="fa-solid fa-flag-checkered" style="margin-right: 6px;"></i> Master Submit';
+                        btn.style.background = 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)';
+                        btn.dataset.action = 'master';
+                    } else {
+                        btn.innerHTML = '<i class="fa-solid fa-cloud-upload" style="margin-right: 6px;"></i> Submit';
+                        btn.style.background = ''; // Reset
+                        btn.dataset.action = 'normal';
+                    }
+                }
+
+                // Clear Output
+                document.getElementById('console-output').innerHTML = "Ready to execute...";
+            },
+
+            async handleToolbarSubmit() {
+                const btn = document.getElementById('btn-submit');
+                if (btn.disabled) {
+                    Toast.show("Please Run and Pass the code first.", "warning");
+                    return;
+                }
+
+                const action = btn.dataset.action;
+                const q = this.questions[this.currentQId];
+                if (!q) return;
+                const isSolved = this.solvedQuestions.has(String(q.id));
+
+                if (action === 'master') {
+                    // Master Submit Flow: Submit current if needed, then finalize
+                    if (!isSolved) {
+                        try {
+                            const success = await this.performSubmit(true, true);
+                            if (success) {
+                                setTimeout(() => {
+                                    Modal.show(
+                                        "Level Completed!",
+                                        "Solution Correct. Ready to finalize level?",
+                                        () => this.submitLevel(),
+                                        "confirm"
+                                    );
+                                }, 800);
+                            }
+                        } catch (e) { console.error(e); }
+                    } else {
+                        Modal.show(
+                            "Confirm Master Submit",
+                            "This will finalize your level attempt and lock further edits. Are you sure?",
+                            () => this.submitLevel(),
+                            "confirm"
+                        );
+                    }
+                } else {
+                    Modal.show(
+                        "Confirm Submission",
+                        "Are you sure you want to submit? This will be graded.", () => {
+                            this.performSubmit();
+                        }
+                    );
+                }
+            },
+
+            renderTestResults(results, isSubmit = false, warnings = null) {
+                const outDiv = document.getElementById('console-output');
+                if (!results || !results.length) {
+                    outDiv.innerHTML = "No results returned.";
+                    return;
+                }
+                let html = isSubmit ? '<h4 class="submit-res">Submission Results</h4>' : '<h4 class="run-res">Run Results</h4>';
+
+                if (warnings) {
+                    html += `<div style="background:#fffbeb; color:#b45309; padding:0.75rem; margin-bottom:1rem; border-radius:0.5rem; border:1px solid #fcd34d; font-family:'Fira Code', monospace; white-space:pre-wrap; font-size:0.9rem;"><i class="fa-solid fa-triangle-exclamation"></i> <strong>Compilation Warnings:</strong>\n${warnings}</div>`;
+                }
+                let allPassed = true;
+
+                results.forEach((r, i) => {
+                    if (!r.passed) allPassed = false;
+                    html += `
+                        <div class="test-case-item ${r.passed ? 'passed' : 'failed'}">
+                            <div class="tc-head" style="display:flex; justify-content:space-between; align-items:center;">
+                                <strong>Case ${i + 1}</strong> 
+                                <span class="badge ${r.passed ? 'success' : 'danger'}">${r.passed ? 'Passed' : 'Failed'}</span>
+                            </div>
+                            <div class="tc-details" style="margin-top:0.5rem; font-size:0.85rem;">
+                                <div style="display:grid; grid-template-columns:1fr; gap:0.5rem;">
+                                    <div>
+                                        <strong>Input:</strong>
+                                        <div style="background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-top:2px; color: #64748b;">
+                                            ${!isSubmit ? `<pre style="margin:0;">${r.input}</pre>` : '(Hidden)'}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <strong>Output:</strong>
+                                        <div style="background:${r.passed ? '#f0fdf4' : '#fef2f2'}; padding:4px 8px; border-radius:4px; margin-top:2px; color:${r.passed ? 'inherit' : '#ef4444'};">
+                                            <pre style="margin:0; white-space:pre-wrap;">${r.output || "No Output"}</pre>
+                                        </div>
+                                    </div>
+                                    ${!r.passed ? `
+                                    <div>
+                                        <strong>Expected:</strong>
+                                        <div style="background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-top:2px;"><code>${r.expected || "N/A"}</code></div>
+                                    </div>
+                                    ${r.error ? `<div class="err" style="color:red; margin-top:4px;">Error: ${r.error}</div>` : ''}
+                                    ` : ''}
+                                </div>
+                            </div>
+                        </div>`;
+                });
+                outDiv.innerHTML = html;
+
+                // Unlock Submission if All Passed
+                if (allPassed && !isSubmit) {
+                    const btn = document.getElementById('btn-submit');
+                    if (btn) {
+                        btn.classList.remove('btn-disabled');
+                        btn.disabled = false;
+                        Toast.show("All Cases Passed! Submission Enabled.", "success");
+                    }
+                }
+            },
+
+
+
+            async handleToolbarSubmit() {
+                const q = this.questions[this.currentQId];
+                if (!q) return;
+
+                const isLastQuestion = (this.currentQId === this.questions.length - 1);
+                const isSolved = this.solvedQuestions.has(String(q.id));
+
+                if (isLastQuestion) {
+                    if (isSolved) {
+                        // Already solved, user clicking Master Submit to finish level
+                        Modal.show("Confirm Master Submit", "Are you sure you want to finalize the level? You cannot change answers after this.", () => {
+                            this.submitLevel();
+                        });
+                    } else {
+                        // Not solved yet. User probably thinks they are submitting the question.
+                        // We try to submit. If correct, we prompt for Level Finalization.
+                        Modal.show("Confirm Submission", "Submit solution for the final question?", async () => {
+                            const success = await this.performSubmit(true, true); // return result, suppress modal
+                            if (success) {
+                                // If passed, immediately ask to finalize level
+                                setTimeout(() => {
+                                    Modal.show("Level Completed!", "Solution Correct! Ready to finalize the level?", () => {
+                                        this.submitLevel();
+                                    });
+                                }, 500);
+                            }
+                        });
+                    }
+                } else {
+                    // Normal Question
+                    if (isSolved) {
+                        Toast.show("Question already solved.", "info");
+                        return;
+                    }
+                    Modal.show("Confirm Submission", "Are you sure you want to submit? This will be graded.", () => {
+                        this.performSubmit();
+                    });
+                }
+            },
+
+            async performSubmit() {
+                const code = CodeEditor.editor.getValue();
+                const q = this.questions[this.currentQId];
+
+                try {
+                    const btn = document.getElementById('btn-submit');
+                    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...'; }
+
+                    const res = await API.request('/contest/submit-question', 'POST', {
+                        code: code, language: this.allowedLanguage, // Strict
+                        question_id: q.id, user_id: this.user.participant_id,
+                        contest_id: this.activeContestId, level: this.currentLevel
+                    });
+
+                    if (res.success) {
+                        // Success Modal
+                        Modal.show("Correct!", "Your solution passed all test cases.", null, 'info');
+                        this.solvedQuestions.add(String(q.id));
+                        this.renderTabs();
+                        this.fetchAndApplyState();
+                        this.renderTestResults(res.test_results || [], true);
+                    } else {
+                        // Failure Modal/Toast
+                        Toast.show("Solution Incorrect", "error");
+                        this.renderTestResults(res.test_results || [], true);
+                    }
+                } catch (e) {
+                    Toast.show("Submission Error: " + e.message, "error");
+                } finally {
+                    const btn = document.getElementById('btn-submit');
+                    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-cloud-upload"></i> Submit'; }
+                }
+            },
+
+            initSocketIO() {
+                const socket = io();
+                socket.on('level:activated', () => this.fetchAndApplyState());
+                socket.on('level:paused', () => this.fetchAndApplyState());
+                socket.on('level:completed', () => this.fetchAndApplyState());
+                socket.on('contest:updated', () => this.fetchAndApplyState());
+                socket.on('contest:countdown', (data) => this.handleCountdown(data));
+            },
+
+            countdownInterval: null,
+
+            handleCountdown(state) {
+                // state = { active: bool, end_time: ISO, target_level: int, etc }
+                const overlay = document.getElementById('countdown-overlay');
+                if (!state || !state.active) {
+                    if (overlay) overlay.style.display = 'none';
+                    if (this.countdownInterval) clearInterval(this.countdownInterval);
+                    return;
+                }
+
+                if (overlay) overlay.style.display = 'flex';
+
+                // Show Target Level Info
+                const msg = document.getElementById('countdown-target-msg');
+                if (msg && state.target_level) {
+                    msg.innerText = `Preparing Level ${state.target_level}...`;
+                }
+
+                // Timer Logic
+                const timerDisplay = overlay.querySelector('.timer-display');
+                if (this.countdownInterval) clearInterval(this.countdownInterval);
+
+                const update = () => {
+                    const now = new Date().getTime();
+                    // Basic ISO parsing (works in modern browsers)
+                    let endStr = state.end_time;
+                    if (endStr && !endStr.endsWith('Z')) endStr += 'Z';
+                    const end = new Date(endStr).getTime();
+                    const diff = end - now;
+
+                    if (diff <= 0) {
+                        timerDisplay.innerText = "00:00";
+                        clearInterval(this.countdownInterval);
+                        // Maybe trigger a reload?
+                        setTimeout(() => this.fetchAndApplyState(), 2000);
+                        return;
+                    }
+
+                    const m = Math.floor(diff / 60000);
+                    const s = Math.floor((diff % 60000) / 1000);
+                    timerDisplay.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                };
+
+                update();
+                this.countdownInterval = setInterval(update, 1000);
+            },
+
+            enforceFullscreen() {
+                // Persistent listener
+                document.addEventListener('fullscreenchange', () => {
+                    if (!document.fullscreenElement && this.isProctoringActive) {
+                        // Exited fullscreen while active -> BLOCK
+                        this.showFullscreenExitOverlay();
+                    } else if (document.fullscreenElement && this.isProctoringActive) {
+                        // Returned to fullscreen -> RESTORE
+                        document.getElementById('fs-exit-overlay').style.display = 'none';
+                        document.getElementById('fs-request-overlay').style.display = 'none';
+                        this.showView('editor');
+                    }
+                });
+            },
+
+            throttleAction(btnId, duration) {
+                if (this.isThrottled) return false;
+                this.isThrottled = true;
+                const btn = document.getElementById(btnId);
+                const originalText = btn ? btn.innerHTML : '';
+
+                if (btn) {
+                    btn.disabled = true;
+                    let timeLeft = duration / 1000;
+                    btn.innerHTML = `<i class="fa-solid fa-clock"></i> Wait ${timeLeft}s`;
+
+                    const interval = setInterval(() => {
+                        timeLeft--;
+                        if (timeLeft <= 0) {
+                            clearInterval(interval);
+                            btn.disabled = false;
+                            btn.innerHTML = originalText;
+                            this.isThrottled = false;
+                        } else {
+                            btn.innerHTML = `<i class="fa-solid fa-clock"></i> Wait ${timeLeft}s`;
+                        }
+                    }, 1000);
+                } else {
+                    setTimeout(() => { this.isThrottled = false; }, duration);
+                }
+                return true;
+            },
+
+            async runCode() {
+                if (this.isThrottled) return;
+                const q = this.questions[this.currentQId];
+                if (!q) {
+                    document.getElementById('console-output').innerHTML = '<div class="error-msg">Error: Current question context invalid. Refresh page.</div>';
+                    return;
+                }
+
+                if (!this.throttleAction('btn-run', 5000)) return;
+
+                console.log("Running Code for Q:", q.id, "Title:", q.title);
+                const code = CodeEditor.editor.getValue();
+                const outDiv = document.getElementById('console-output');
+                outDiv.innerHTML = '<div class="running">Running test cases...</div>';
+
+                try {
+                    const res = await API.request('/contest/run', 'POST', {
+                        code: code, language: this.allowedLanguage,
+                        question_id: Number(q.id) || q.id,
+                        user_id: this.user.participant_id,
+                        contest_id: this.activeContestId, level: this.currentLevel
+                    });
+
+                    if (res && res.test_results) {
+                        this.renderTestResults(res.test_results, false, res.warnings);
+                        const execTime = document.getElementById('exec-time');
+                        if (execTime) execTime.innerText = res.execution_time || "Done";
+                    } else {
+                        // Handle specific backend error "Question not found" gracefully?
+                        // If res.error exists, show it.
+                        outDiv.innerHTML = `<div class="error-msg">${res.error || 'Execution Error: Unknown Backend Response'}</div>`;
+                    }
+                } catch (e) { outDiv.innerHTML = `<div class="error-msg">Connection Error: ${e.message}</div>`; }
+            },
+
+            async performSubmit(returnResult = false, suppressSuccessModal = false) {
+                const q = this.questions[this.currentQId];
+                if (!q) return false;
+
+                const code = CodeEditor.editor.getValue();
+                const btn = document.getElementById('btn-submit');
+
+                // UI Loading State
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+                }
+
+                try {
+                    const res = await API.request('/contest/submit-question', 'POST', {
+                        code: code, language: this.allowedLanguage,
+                        question_id: q.id, user_id: this.user.participant_id,
+                        contest_id: this.activeContestId, level: this.currentLevel
+                    });
+
+                    // 1. System Error / Validation Error (400/404/500 from Backend)
+                    if (res.error) {
+                        Toast.show(res.error, "error");
+                        if (returnResult) return false;
+                        return;
+                    }
+
+                    // 2. Verified Result (Success or Incorrect)
+                    if (res.success) {
+                        // PASSED
+                        this.solvedQuestions.add(String(q.id));
+                        this.renderTabs();
+                        this.fetchAndApplyState(); // Refresh score/progress
+
+                        this.renderTestResults(res.test_results || [], true, res.warnings);
+
+                        if (!suppressSuccessModal) {
+                            Modal.show("Correct!", "Your solution passed all test cases.", null, 'info');
+                        }
+                        return true;
+                    } else {
+                        // FAILED Logic Check
+                        // Backend explicitly sent success=False
+                        Toast.show(res.message || "Solution Incorrect", "error");
+                        this.renderTestResults(res.test_results || [], true, res.warnings);
+                        return false;
+                    }
+
+                } catch (e) {
+                    Toast.show("Network/System Error: " + e.message, "error");
+                    return false;
+                } finally {
+                    // Restore Button State
+                    if (btn) {
+                        btn.disabled = false;
+                        if (this.currentQId === this.questions.length - 1) {
+                            btn.innerHTML = '<i class="fa-solid fa-flag-checkered"></i> Master Submit';
+                            btn.dataset.action = 'master';
+                            btn.style.background = 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)';
+                        } else {
+                            btn.innerHTML = '<i class="fa-solid fa-cloud-upload"></i> Submit';
+                            btn.dataset.action = 'normal';
+                            btn.style.background = '';
+                        }
+                    }
+                }
+            },
+
+            async submitLevel() {
+                try {
+                    // Check if all questions are solved?
+                    // Verify locally first
+                    if (this.solvedQuestions.size < this.questions.length) {
+                        // Although prompt says "partial scores must be finalized", usually Master Submit implies "I am done".
+                        // We will allow it but warn? Or just proceed.
+                        // "Master Submit must finalize the level attempt... persist... score"
+                    }
+
+                    const btn = document.getElementById('btn-submit');
+                    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Finalizing...'; }
+
+                    const res = await API.request('/contest/submit-level', 'POST', {
+                        user_id: this.user.participant_id,
+                        contest_id: this.activeContestId,
+                        level: this.currentLevel
+                    });
+
+                    if (res.success) {
+                        Modal.show("Level Completed!", "Your score has been recorded. Returning to level selection.", () => {
+                            this.showView('selection');
+                            this.fetchAndApplyState();
+                        }, 'info');
+                    } else {
+                        Toast.show("Error finalizing level: " + res.message, "error");
+                        if (btn) btn.disabled = false;
+                    }
+                } catch (e) {
+                    console.error(e);
+                    Toast.show("Network Error during finalization", "error");
+                    const btn = document.getElementById('btn-submit');
+                    if (btn) btn.disabled = false;
+                }
+            },
+        };
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,5 @@
+# Requirements for AWS Migration Tools
+boto3==1.34.34
+mysql-connector-python==8.2.0
+aiohttp==3.9.1
+requests==2.31.0

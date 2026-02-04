@@ -1,0 +1,448 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Debug Marathon Application - Cost-Optimized & Auto-Scaling"
+
+Parameters:
+  DBUsername:
+    Type: String
+    Default: admin
+    Description: Database admin username
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    Description: Database admin password
+
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for SSH access
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-0532be01f26a3de55
+    us-west-2:
+      AMI: ami-0fcee47b1475c1af3
+    us-east-2:
+      AMI: ami-0401b65de01e90bd8
+    eu-west-1:
+      AMI: ami-0e7ad4fad59eb2b25
+    ap-southeast-1:
+      AMI: ami-069de344e657c5dc7 # Amazon Linux 2023
+
+Resources:
+  # VPC and Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: debug-marathon-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: debug-marathon-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: debug-marathon-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: debug-marathon-public-1
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: debug-marathon-public-2
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref PublicRouteTable
+
+  # Private Subnets & NAT (Optional usage, but kept for DB isolation)
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.3.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: debug-marathon-private-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.4.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: debug-marathon-private-2
+
+  # Security Groups
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for load balancer
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for web servers
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        # Allow traffic from ALB
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        # SSH Limit (Ideally limit this to your IP, currently 0.0.0.0/0 for demo)
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WebServerSecurityGroup
+
+  # RDS Database
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: debug-marathon-db
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      AllocatedStorage: 20
+      DBName: debug_marathon_v3
+      VPCSecurityGroups:
+        - !Ref DatabaseSecurityGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageType: gp2
+
+  # Instance Role
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+
+  # Load Balancer
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: debug-marathon-alb
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref LoadBalancerSecurityGroup
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+        - Key: routing.http2.enabled
+          Value: 'true'
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: debug-marathon-tg
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      HealthCheckPath: /api/health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 5
+      TargetType: instance
+      Matcher:
+        HttpCode: '200'
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # Launch Template (Updated with PROVEN UserData)
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: debug-marathon-template
+      LaunchTemplateData:
+        ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
+        InstanceType: t3.small
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds:
+          - !Ref WebServerSecurityGroup
+        IamInstanceProfile:
+          Arn: !GetAtt EC2InstanceProfile.Arn
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -e
+            exec > >(tee /var/log/user-data.log) 2>&1
+            echo "Starting Setup..."
+            
+            # 1. Install Deps
+            yum update -y
+            yum install -y nginx python3-pip unzip aws-cli jq
+            pip3 install --no-cache-dir supervisor Flask==3.0.0 flask-cors flask-socketio python-dotenv gunicorn mysql-connector-python PyJWT eventlet
+
+            # 2. Structure
+            mkdir -p /opt/debug-marathon/backend /opt/debug-marathon/frontend /etc/nginx/conf.d /var/log/supervisor
+
+            # 3. Download Code (Assumes S3 structure)
+            cd /opt/debug-marathon/backend
+            aws s3 cp s3://debug-marathon-assets-052150906633/backend.zip /tmp/backend.zip --region ap-southeast-1
+            unzip -o /tmp/backend.zip
+            cd /opt/debug-marathon/frontend
+            aws s3 cp s3://debug-marathon-assets-052150906633/frontend.zip /tmp/frontend.zip --region ap-southeast-1
+            unzip -o /tmp/frontend.zip
+
+            # 4. Config - DB Connection (Patched)
+            cat > /opt/debug-marathon/backend/db_connection.py << 'EOF'
+            import logging, os, configparser
+            import mysql.connector.pooling
+            from dotenv import load_dotenv
+            load_dotenv()
+            
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger("DB")
+
+            class MySQLManager:
+                _instance = None
+                def __new__(cls):
+                    if not cls._instance:
+                        cls._instance = super(MySQLManager, cls).__new__(cls)
+                        cls._instance._init_pool()
+                    return cls._instance
+                
+                def _init_pool(self):
+                    self.pid = os.getpid()
+                    try:
+                        self.pool = mysql.connector.pooling.MySQLConnectionPool(
+                            pool_name=f"pool_{self.pid}",
+                            pool_size=20,
+                            pool_reset_session=True,
+                            host=os.getenv('DB_HOST'),
+                            user=os.getenv('DB_USER'),
+                            password=os.getenv('DB_PASSWORD'),
+                            database=os.getenv('DB_NAME')
+                        )
+                    except Exception as e:
+                        logger.error(f"Pool Init Error: {e}")
+
+                def get_connection(self):
+                    if getattr(self, 'pid', None) != os.getpid():
+                        self._init_pool()
+                    return self.pool.get_connection()
+                
+                def execute_query(self, q, p=None):
+                    conn = self.get_connection()
+                    cur = conn.cursor(dictionary=True)
+                    cur.execute(q, p or ())
+                    res = cur.fetchall()
+                    cur.close(); conn.close()
+                    return res
+                
+                def execute_update(self, q, p=None):
+                    conn = self.get_connection()
+                    cur = conn.cursor()
+                    try:
+                        cur.execute(q, p or ())
+                        conn.commit()
+                        return True
+                    except:
+                        conn.rollback(); return False
+                    finally:
+                        cur.close(); conn.close()
+
+            db_manager = MySQLManager()
+            EOF
+
+            # 5. Config - Environment (Injected from CloudFormation)
+            cat > /opt/debug-marathon/backend/.env << 'ENVEOF'
+            DB_HOST=${Database.Endpoint.Address}
+            DB_PORT=3306
+            DB_USER=${DBUsername}
+            DB_PASSWORD=${DBPassword}
+            DB_NAME=debug_marathon_v3
+            FLASK_ENV=production
+            SECRET_KEY=change_me_in_prod
+            FRONTEND_URL=http://${LoadBalancer.DNSName}
+            ENVEOF
+
+            # 6. Config - Nginx (WebSockets)
+            cat > /etc/nginx/conf.d/app.conf << 'NGINXEOF'
+            server {
+                listen 80;
+                location /socket.io {
+                    proxy_pass http://127.0.0.1:5000/socket.io;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Host $host;
+                }
+                location / {
+                    proxy_pass http://127.0.0.1:5000;
+                    proxy_set_header Host $host;
+                }
+                location /css/ { alias /opt/debug-marathon/frontend/css/; }
+                location /js/ { alias /opt/debug-marathon/frontend/js/; }
+            }
+            NGINXEOF
+            rm -f /etc/nginx/conf.d/default.conf
+
+            # 7. Start
+            cat > /etc/supervisord.conf << 'SUPEOF'
+            [supervisord]
+            nodaemon=false
+            [program:app]
+            command=/usr/local/bin/gunicorn --workers 1 --threads 100 --bind 0.0.0.0:5000 app:app
+            directory=/opt/debug-marathon/backend
+            autostart=true
+            autorestart=true
+            SUPEOF
+
+            systemctl enable nginx
+            systemctl restart nginx
+            supervisord -c /etc/supervisord.conf &
+
+  # Auto Scaling Group
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: debug-marathon-asg
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: 2
+      MaxSize: 6
+      DesiredCapacity: 2
+      VPCZoneIdentifier:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      TargetGroupARNs:
+        - !Ref TargetGroup
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+
+  ScaleUpPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: 40.0
+
+Outputs:
+  LoadBalancerURL:
+    Description: Load Balancer URL
+    Value: !Sub "http://${LoadBalancer.DNSName}"
