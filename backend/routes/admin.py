@@ -174,6 +174,23 @@ def delete_participant(pid):
     db_manager.execute_update("DELETE FROM users WHERE username=%s", (pid,))
     return jsonify({'success': True})
 
+@bp.route('/participants', methods=['DELETE'])
+@admin_required
+def delete_all_participants():
+    try:
+        # Delete only participants, keep admins/leaders
+        db_manager.execute_update("DELETE FROM users WHERE role='participant'")
+        # Optional: Reset submissions, violations, etc. if cascading isn't set
+        # But safest is just delete users and let constraints work or keep history
+        # For a "Reset", usually we want to clear everything related
+        db_manager.execute_update("DELETE FROM submissions WHERE user_id NOT IN (SELECT user_id FROM users)")
+        db_manager.execute_update("DELETE FROM violations WHERE user_id NOT IN (SELECT user_id FROM users)")
+        db_manager.execute_update("DELETE FROM user_progress WHERE user_id NOT IN (SELECT user_id FROM users)")
+        
+        return jsonify({'success': True, 'message': 'All participants deleted successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 # === Question Management ===
 

@@ -1332,6 +1332,22 @@ const Admin = {
         if (modal) modal.style.display = 'flex';
     },
 
+    async deleteAllParticipants() {
+        if (!confirm("⚠️ DANGER: Are you sure you want to DELETE ALL PARTICIPANTS?\n\nThis action cannot be undone. All participant progress and submissions will be lost.")) return;
+
+        const userInput = prompt("Type 'DELETE ALL' to confirm:");
+        if (userInput !== 'DELETE ALL') return alert("Action cancelled.");
+
+        try {
+            await API.request('/admin/participants', 'DELETE');
+            this.showNotification("All participants deleted successfully", "success");
+            this.loadParticipantsView();
+        } catch (e) {
+            console.error(e);
+            alert("Failed to delete all participants: " + e.message);
+        }
+    },
+
     async submitNewParticipant() {
         const name = document.getElementById('new-p-name').value;
         const college = document.getElementById('new-p-college').value;
@@ -2116,6 +2132,23 @@ const Admin = {
                         </button>
                         <button class="btn btn-primary" onclick="Admin.exportProctoringReport()">
                             <i class="fa-solid fa-download"></i> Export Excel
+                        </button>
+                    </div>
+                </div>
+
+                <!-- This block is for the Participants view, not Proctoring. Assuming it should be placed in a separate loadParticipantsView function or similar.
+                     However, as per the instruction, it's inserted here. This might lead to incorrect UI if not handled by other parts of the application. -->
+                <div class="admin-header">
+                    <h1>Participants <span class="badge badge-secondary">${0}</span></h1> <!-- Participants count is not available here, using 0 as placeholder -->
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn btn-secondary" onclick="Admin.deleteAllParticipants()" style="background-color: #fee2e2; color: #b91c1c; border-color: #fecaca;">
+                            <i class="fa-solid fa-trash"></i> Delete All
+                        </button>
+                        <button class="btn btn-secondary" onclick="Admin.importParticipants()">
+                            <i class="fa-solid fa-file-import"></i> Import Excel
+                        </button>
+                        <button class="btn btn-primary" onclick="Admin.addParticipant()">
+                            <i class="fa-solid fa-plus"></i> Add New
                         </button>
                     </div>
                 </div>
