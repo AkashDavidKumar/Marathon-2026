@@ -745,17 +745,25 @@
 
             async startLevel() {
                 try {
+                    console.log('Starting level:', this.currentLevel, 'for user:', this.user.participant_id);
                     const res = await API.request('/contest/start-level', 'POST', {
                         user_id: this.user.participant_id,
                         contest_id: this.activeContestId,
                         level: this.currentLevel
                     });
+                    console.log('Start level response:', res);
+
                     if (res && res.success) {
                         document.getElementById('level-start-overlay').style.display = 'none';
                         this.levelStartTime = res.start_time;
                         this.levelDuration = res.level_duration_minutes;
                         this.startTimer();
                         this.enterLevel(this.currentLevel);
+                    } else {
+                        // Backend returned error
+                        const errorMsg = res?.error || res?.message || 'Unknown error';
+                        console.error('Backend error:', errorMsg);
+                        Toast.show(`Failed to start: ${errorMsg}`, "error");
                     }
                 } catch (e) {
                     console.error("Start level error", e);
