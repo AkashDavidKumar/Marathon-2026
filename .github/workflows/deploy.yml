@@ -18,6 +18,7 @@ jobs:
         mkdir -p deploy_package
         cp -r backend deploy_package/
         cp -r frontend deploy_package/
+        cp nginx-optimized.conf deploy_package/
         # Create tarball preserving permissions
         tar -czf app.tar.gz -C deploy_package .
         echo "Package created: $(du -h app.tar.gz | cut -f1)"
@@ -49,6 +50,7 @@ jobs:
           fi
           
           # Restart services
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
@@ -98,6 +100,7 @@ jobs:
           sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
@@ -146,6 +149,7 @@ jobs:
           sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
@@ -194,6 +198,7 @@ jobs:
           sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
           sudo supervisorctl restart debug-marathon || true
           sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)

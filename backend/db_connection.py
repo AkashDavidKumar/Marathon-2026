@@ -85,7 +85,7 @@ class MySQLManager:
                 full_config['database'] = target_db
                 self.pool = mysql.connector.pooling.MySQLConnectionPool(
                     pool_name=f"debug_marathon_pool_{self.pid}",
-                    pool_size=20, # Optimized: Increased from default
+                    pool_size=30, # Optimized: Increased to match Architecture
                     pool_reset_session=True,
                     connection_timeout=60, # Connection timeout 60s
                     **full_config
