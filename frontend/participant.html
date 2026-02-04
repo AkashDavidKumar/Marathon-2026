@@ -536,8 +536,104 @@
                 });
             },
 
-            // ... init ... (Keep this as is, don't include in replacement if not needed, but line numbers need to match) -> Actually I can't skip lines easily.
-            // I'll replace specifically the functions.
+
+            async init(user) {
+                this.user = user;
+                console.log('Contest.init() called for user:', user.participant_id);
+
+                // Find active contest
+                try {
+                    const contestsRes = await API.request('/contest');
+                    const contests = contestsRes.contests || [];
+                    const liveContest = contests.find(c => c.status === 'live');
+
+                    if (liveContest) {
+                        this.activeContestId = liveContest.id;
+                        console.log('Active Contest ID:', this.activeContestId);
+                    } else {
+                        // Fallback to ID 1
+                        this.activeContestId = 1;
+                        console.warn('No live contest found, using ID 1');
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch contests:', e);
+                    this.activeContestId = 1;
+                }
+
+                // Initialize Socket.IO
+                this.initSocketIO();
+
+                // Fetch and apply initial state
+                await this.fetchAndApplyState();
+
+                // Render level selection cards
+                this.renderLevelSelection();
+
+                // Start periodic state polling (every 10s)
+                setInterval(() => this.fetchAndApplyState(), 10000);
+
+                // Enforce fullscreen monitoring
+                this.enforceFullscreen();
+            },
+
+            async fetchAndApplyState() {
+                if (!this.user || !this.activeContestId) return;
+
+                try {
+                    const res = await API.request('/contest/participant-state', 'POST', {
+                        user_id: this.user.participant_id,
+                        contest_id: this.activeContestId
+                    });
+
+                    if (!res || !res.success) {
+                        console.error('Failed to fetch state:', res);
+                        return;
+                    }
+
+                    // Update state
+                    this.userMaxLevel = res.level || 1;
+                    this.userStatus = res.status || 'NOT_STARTED';
+                    this.roundsMap = res.rounds_map || {};
+
+                    // Update solved questions
+                    if (res.solved_ids) {
+                        this.solvedQuestions = new Set(res.solved_ids.map(String));
+                    }
+
+                    // Check for state changes
+                    const newHash = this.getStateHash(res);
+                    if (newHash !== this.lastStateHash) {
+                        console.log('State changed, updating UI');
+                        this.lastStateHash = newHash;
+
+                        // Re-render level cards if on selection screen
+                        const selectionSection = document.getElementById('level-selection-section');
+                        if (selectionSection && selectionSection.style.display !== 'none') {
+                            this.renderLevelSelection();
+                        }
+
+                        // Update roadmap if in editor
+                        this.updateRoadmapUI();
+                    }
+
+                    // Handle countdown
+                    if (res.countdown) {
+                        this.handleCountdown(res.countdown);
+                    }
+
+                    // Handle selection notifications
+                    if (res.results_released && res.is_shortlisted_next !== undefined) {
+                        if (res.is_shortlisted_next) {
+                            document.getElementById('selected-overlay').style.display = 'flex';
+                        } else {
+                            document.getElementById('unselected-overlay').style.display = 'flex';
+                        }
+                    }
+
+                } catch (e) {
+                    console.error('fetchAndApplyState error:', e);
+                }
+            },
 
             renderLevelSelection() {
                 const grid = document.getElementById('level-selection-grid');
