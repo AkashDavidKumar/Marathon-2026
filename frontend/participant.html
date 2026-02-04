@@ -629,14 +629,49 @@
                         this.handleCountdown(res.countdown);
                     }
 
-                    // Handle selection notifications
-                    if (res.results_released && res.is_shortlisted_next !== undefined) {
+                    // ---------------- NOTIFICATION LOGIC (from working offline version) ----------------
+                    const selOverlay = document.getElementById('selected-overlay');
+                    const unselOverlay = document.getElementById('unselected-overlay');
+
+                    // Get authoritative status of the current level
+                    const currentLvl = res.level || 1;
+                    const levelStatus = (res.rounds_map && res.rounds_map[currentLvl]) ? res.rounds_map[currentLvl] : 'pending';
+
+                    // Show overlays only if:
+                    // 1. User is NOT inside the level (IN_PROGRESS)
+                    // 2. Admin explicitly released results
+                    // 3. The level itself is COMPLETED (prevents premature showing during active level)
+                    if (this.userStatus !== 'IN_PROGRESS' && res.results_released && levelStatus === 'completed') {
                         if (res.is_shortlisted_next) {
-                            document.getElementById('selected-overlay').style.display = 'flex';
+                            unselOverlay.style.display = 'none';
+                            selOverlay.style.display = 'flex';
+
+                            // Check if global level has advanced (Level Started)
+                            if (res.global_level > this.userMaxLevel) {
+                                // Update overlay to show Enter button if not already showing
+                                if (!document.getElementById('btn-enter-next')) {
+                                    selOverlay.innerHTML = `
+                                        <i class="fa-solid fa-rocket" style="font-size: 5rem; color: #3b82f6; margin-bottom: 2rem; animation: bounce 1s infinite;"></i>
+                                        <h1 style="font-size: 3rem; font-weight: 800; color: white; margin-bottom: 1rem;">LEVEL ${res.global_level} STARTED!</h1>
+                                        <p style="color:white; font-size:1.2rem; margin-bottom:2rem;">The round is live. Good luck!</p>
+                                        <button id="btn-enter-next" class="btn btn-primary" onclick="Contest.handleLevelClick(${res.global_level}); document.getElementById('selected-overlay').style.display='none';"
+                                            style="padding: 1rem 3rem; font-size: 1.5rem; border-radius: 50px; box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);">
+                                            ENTER NOW
+                                        </button>
+                                    `;
+                                }
+                            }
                         } else {
-                            document.getElementById('unselected-overlay').style.display = 'flex';
+                            // Not Selected
+                            selOverlay.style.display = 'none';
+                            unselOverlay.style.display = 'flex';
                         }
+                    } else {
+                        // Hide overlays if logic doesn't apply
+                        if (selOverlay) selOverlay.style.display = 'none';
+                        if (unselOverlay) unselOverlay.style.display = 'none';
                     }
+                    // --------------------------------------------------------
 
                 } catch (e) {
                     console.error('fetchAndApplyState error:', e);
