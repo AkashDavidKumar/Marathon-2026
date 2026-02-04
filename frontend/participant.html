@@ -771,6 +771,53 @@
                 }
             },
 
+            startTimer() {
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                const update = () => {
+                    const timerEl = document.getElementById('contest-timer');
+                    if (!timerEl) return;
+
+                    if (!this.levelStartTime) {
+                        timerEl.innerText = "00:00:00";
+                        return;
+                    }
+
+                    // Use UTC absolute comparison
+                    const now = new Date();
+                    let startStr = this.levelStartTime;
+
+                    if (!startStr.endsWith('Z') && !startStr.includes('+')) {
+                        startStr += 'Z';
+                    }
+
+                    const startT = new Date(startStr);
+                    if (isNaN(startT.getTime())) {
+                        timerEl.innerText = "--:--:--";
+                        return;
+                    }
+
+                    const endsAt = new Date(startT.getTime() + (this.levelDuration * 60000));
+                    const diff = endsAt.getTime() - now.getTime();
+
+                    if (diff <= 0) {
+                        timerEl.innerText = "00:00:00";
+                        timerEl.classList.add('danger');
+                        return;
+                    }
+
+                    const h = Math.floor(diff / 3600000);
+                    const m = Math.floor((diff % 3600000) / 60000);
+                    const s = Math.floor((diff % 60000) / 1000);
+
+                    timerEl.innerText = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+                    if (diff < 300000) timerEl.classList.add('warning'); // 5 mins left
+                    else timerEl.classList.remove('warning', 'danger');
+                };
+                update();
+                this.timerInterval = setInterval(update, 1000);
+            },
+
             enterLevel(level) {
                 this.currentLevel = level;
                 this.isProctoringActive = true;
