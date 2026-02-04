@@ -1240,6 +1240,9 @@ const Admin = {
                     <h1>Participant Management</h1>
                     <div style="display:flex; gap:10px;">
                         <input type="file" id="upload-excel" accept=".xlsx, .xls" style="display:none" onchange="Admin.handleFileUpload(this)">
+                        <button class="btn btn-secondary" onclick="Admin.deleteAllParticipants()" style="background-color: #fee2e2; color: #b91c1c; border-color: #fecaca;">
+                            <i class="fa-solid fa-trash"></i> Delete All
+                        </button>
                         <button class="btn btn-secondary" onclick="document.getElementById('upload-excel').click()">
                             <i class="fa-solid fa-file-excel"></i> Import Excel
                         </button>
