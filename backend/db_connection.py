@@ -147,8 +147,13 @@ class MySQLManager:
 
         cursor = conn.cursor(dictionary=True)
         try:
+            import time
+            start_t = time.time()
             cursor.execute(query, params or ())
             result = cursor.fetchall()
+            dur = (time.time() - start_t) * 1000
+            if dur > 100:
+                logger.warning(f"⚠️ SLOW QUERY ({dur:.2f}ms): {query[:200]}...")
             return result
         except Error as e:
             logger.error(f"SELECT Query failed: {e}\nQuery: {query}")

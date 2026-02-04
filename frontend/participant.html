@@ -14,6 +14,29 @@
     <link rel="stylesheet" href="css/main.css">
     <link rel="stylesheet" href="css/dashboard.css">
     <link rel="stylesheet" href="css/modern-forms.css">
+
+    <!-- Performance Monitoring -->
+    <script>
+        const observer = new PerformanceObserver((list) => {
+            list.getEntries().forEach((entry) => {
+                if (entry.entryType === 'navigation') {
+                    console.log('Page Load Time:', entry.loadEventEnd - entry.fetchStart);
+                }
+                if (entry.entryType === 'largest-contentful-paint') {
+                    if (entry.startTime > 2500) console.warn('Poor LCP:', entry.startTime);
+                }
+            });
+        });
+        observer.observe({ entryTypes: ['navigation', 'largest-contentful-paint'] });
+
+        document.addEventListener('click', (event) => {
+            const start = performance.now();
+            setTimeout(() => {
+                const duration = performance.now() - start;
+                if (duration > 100) console.warn(`Slow click response: ${duration.toFixed(2)}ms`);
+            }, 0);
+        });
+    </script>
 </head>
 
 <body>

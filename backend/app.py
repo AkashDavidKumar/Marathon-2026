@@ -11,6 +11,41 @@ def create_app(config_class=Config):
     cors.init_app(app, resources={r"/api/*": {"origins": app.config.get('FRONTEND_URL', '*')}})
     socketio.init_app(app, cors_allowed_origins="*")
 
+    # --- PERFORMANCE MIDDLEWARE ---
+    import time
+    from flask import request, g
+
+    @app.before_request
+    def before_request():
+        g.start_time = time.time()
+
+    @app.after_request
+    def after_request(response):
+        # Calculate duration
+        if hasattr(g, 'start_time'):
+            duration = (time.time() - g.start_time) * 1000 # ms
+            # Log slow requests (>1s)
+            if duration > 1000:
+                print(f"⚠️ SLOW API: {request.method} {request.path} took {duration:.2f}ms")
+            # Log all for debug (optional, can be noisy)
+            # print(f"API: {request.method} {request.path} took {duration:.2f}ms")
+
+        # Cache Control
+        if request.path.startswith('/api/static'):
+            response.headers['Cache-Control'] = 'public, max-age=3600'
+        elif request.path.startswith('/api/'):
+            # Dynamic API - mostly no-cache or short cache
+            # For now, let's allow 5 min private cache for non-sensitive GETs if architecturally safe
+            # But contests are real-time, so strict short cache is better.
+            response.headers['Cache-Control'] = 'private, max-age=0, no-cache' # Safety first for contest
+        else:
+            # Static files handled by Flask (dev mode mostly, Prod uses Nginx)
+            if request.path.endswith('.css') or request.path.endswith('.js') or request.path.endswith('.png'):
+                response.headers['Cache-Control'] = 'public, max-age=3600'
+
+        return response
+    # ------------------------------
+
     # Register Blueprints
     from routes.auth import bp as auth_bp
     from routes.contest import bp as contest_bp
