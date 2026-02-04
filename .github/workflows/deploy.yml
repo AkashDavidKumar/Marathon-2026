@@ -50,6 +50,7 @@ jobs:
           
           # Restart services
           sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
           
           rm /tmp/app.tar.gz
@@ -69,6 +70,7 @@ jobs:
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
           sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
           rm /tmp/app.tar.gz
           echo "Deployment to Worker 1 completed."
@@ -87,6 +89,7 @@ jobs:
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
           sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
           rm /tmp/app.tar.gz
           echo "Deployment to Worker 2 completed."
@@ -105,6 +108,7 @@ jobs:
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
           sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
           sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
           rm /tmp/app.tar.gz
           echo "Deployment to Worker 3 completed."
