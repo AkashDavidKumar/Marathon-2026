@@ -64,9 +64,9 @@ jobs:
         scp -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no app.tar.gz ubuntu@${SERVER_IP}:/tmp/
         ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no ubuntu@${SERVER_IP} '
           set -e
-          sudo mkdir -p /var/www/debug-marathon
-          sudo tar -xzf /tmp/app.tar.gz -C /var/www/debug-marathon
-          cd /var/www/debug-marathon/backend
+          sudo mkdir -p /opt/debug-marathon
+          sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
+          cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --quiet || true; fi
           sudo systemctl restart debug-marathon || sudo systemctl restart gunicorn || true
           sudo systemctl restart nginx || true
@@ -82,9 +82,9 @@ jobs:
         scp -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no app.tar.gz ubuntu@${SERVER_IP}:/tmp/
         ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no ubuntu@${SERVER_IP} '
           set -e
-          sudo mkdir -p /var/www/debug-marathon
-          sudo tar -xzf /tmp/app.tar.gz -C /var/www/debug-marathon
-          cd /var/www/debug-marathon/backend
+          sudo mkdir -p /opt/debug-marathon
+          sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
+          cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --quiet || true; fi
           sudo systemctl restart debug-marathon || sudo systemctl restart gunicorn || true
           sudo systemctl restart nginx || true
@@ -100,9 +100,9 @@ jobs:
         scp -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no app.tar.gz ubuntu@${SERVER_IP}:/tmp/
         ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no ubuntu@${SERVER_IP} '
           set -e
-          sudo mkdir -p /var/www/debug-marathon
-          sudo tar -xzf /tmp/app.tar.gz -C /var/www/debug-marathon
-          cd /var/www/debug-marathon/backend
+          sudo mkdir -p /opt/debug-marathon
+          sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
+          cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --quiet || true; fi
           sudo systemctl restart debug-marathon || sudo systemctl restart gunicorn || true
           sudo systemctl restart nginx || true
