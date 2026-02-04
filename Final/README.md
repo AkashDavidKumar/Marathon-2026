@@ -1,10 +1,10 @@
 # 🎯 Debug Marathon Platform
 
-A professional, full-stack competitive coding platform featuring a modern landing page, secure contest environment, real-time leaderboard, and comprehensive admin panel. helllo 
+A professional, full-stack competitive coding platform featuring a modern landing page, secure contest environment, real-time leaderboard, and comprehensive admin panel.
 
 ## 🚀 Features
 
-- **Participant Portal**: Secure login, ACE code editor, and real-time compilation feedback.
+- **Participant Portal**: ck.
 - **Proctoring System**: Advanced anti-cheating measures (Tab switch detection, clipboard blocking, etc.).
 - **Admin Dashboard**: Live monitoring of participants, violation tracking, and contest control.
 - **Live Leaderboard**: Real-time ranking with "Projector Mode" for event displays.
