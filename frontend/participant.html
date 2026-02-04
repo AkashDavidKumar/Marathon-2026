@@ -519,7 +519,7 @@
                 this.showFullscreenRequestOverlay();
                 await this.syncContestState();
                 await this.fetchAndApplyState();
-                setInterval(() => this.fetchAndApplyState(), 6000); // Increased to 6s
+                setInterval(() => this.fetchAndApplyState(), 10000); // Optimized: Reduced polling to 10s
                 this.initSocketIO();
             },
 
@@ -764,6 +764,10 @@
             },
 
             updateRoadmapUI() {
+                // Only update if Game UI is being used/visible to avoid errors
+                const wrapper = document.getElementById('game-ui-wrapper');
+                if (!wrapper || wrapper.style.display === 'none') return;
+
                 for (let i = 1; i <= 5; i++) {
                     const badge = document.getElementById(`level-${i}`);
                     if (!badge) continue;
