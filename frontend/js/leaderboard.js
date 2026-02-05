@@ -15,7 +15,7 @@ const Leaderboard = {
         this.setupSearch();
         this.setupLevelSelect();
         this.initSocket(); // Real-time updates
-        
+
         // Initial Load
         await this.loadData();
     },
@@ -26,8 +26,10 @@ const Leaderboard = {
             return;
         }
 
-        // Connect to same host
-        this.socket = io();
+        // Connect to dynamic backend
+        const socketUrl = API.BASE_URL.replace('/api', '');
+        console.log("Leaderboard connecting to:", socketUrl);
+        this.socket = io(socketUrl);
 
         this.socket.on('connect', () => {
             console.log("Leaderboard Connected to Live Updates");
@@ -36,7 +38,7 @@ const Leaderboard = {
         // Listen for specific updates to trigger refresh
         // We can optimize to just update specific rows, but for leaderboard correctness 
         // (ranks change), fetching fresh sorted data is safer and "smart rendering" handles the visual smoothing.
-        
+
         const refreshHandler = () => {
             // slightly debounce multiple rapid concurrent updates
             if (this.refreshTimer) clearTimeout(this.refreshTimer);
@@ -47,7 +49,7 @@ const Leaderboard = {
         this.socket.on('contest:stats_update', refreshHandler);
         this.socket.on('participant:submitted', refreshHandler);
         this.socket.on('leaderboard:update', refreshHandler);
-        
+
         // Also refresh on generic contest updates (like new level active)
         this.socket.on('contest:updated', refreshHandler);
     },
@@ -74,8 +76,8 @@ const Leaderboard = {
             this.selectedLevel = parseInt(e.target.value);
             localStorage.setItem('lb_level', this.selectedLevel);
             // Reset data on level switch to force full re-render logic properly
-            this.data = []; 
-            document.getElementById('lb-body').innerHTML = ''; 
+            this.data = [];
+            document.getElementById('lb-body').innerHTML = '';
             this.loadData();
         });
     },
@@ -84,14 +86,14 @@ const Leaderboard = {
         try {
             // If API call takes time, we don't want to freeze UI, but we also don't want to flash
             const data = await API.request(`/leaderboard/?level=${this.selectedLevel}`);
-            
+
             if (data) {
                 this.totalQuestions = data.total_questions || 0;
                 // Store raw data
                 this.data = data.leaderboard || [];
                 // Render with smart Diff
                 this.updateTable(document.getElementById('search-input').value);
-                
+
                 // Update timestamp
                 const now = new Date();
                 const tsEl = document.getElementById('last-updated');
@@ -130,10 +132,10 @@ const Leaderboard = {
         // We need to maintain order. 
         // Strategy: Iterate displayData. If row exists, update content and verify position. 
         // If not, create.
-        
+
         // We use a DocumentFragment for new rows if we were rebuilding, but here we want to modify in place.
         // However, re-ordering implies moving nodes.
-        
+
         displayData.forEach((p, index) => {
             const domId = `row-${p.id}`; // using safe ID or data attribute
             let row = existingRows[p.id];
@@ -159,7 +161,7 @@ const Leaderboard = {
                 // UPDATE Existing
                 // Only touch DOM if changed (Micro-optimization, maybe overkill but safest against flicker)
                 if (row.className !== rowClass) row.className = rowClass;
-                
+
                 // Update Cells directly by index to avoid full innerHTML parse
                 // Cells: 0:Rank, 1:Name, 2:Dept, 3:Score, 4:Time, 5:Solved
                 const cells = row.cells;
@@ -180,7 +182,7 @@ const Leaderboard = {
                         tbody.appendChild(row);
                     }
                 }
-                
+
                 // Mark as processed (remove from tracker to identify deletions)
                 delete existingRows[p.id];
 
@@ -197,9 +199,9 @@ const Leaderboard = {
                     <td style="font-family: var(--font-mono);">${timeHtml}</td>
                     <td>${solvedHtml}</td>
                 `;
-                
+
                 // Insert at correct index
-                 if (index < tbody.children.length) {
+                if (index < tbody.children.length) {
                     tbody.insertBefore(row, tbody.children[index]);
                 } else {
                     tbody.appendChild(row);
@@ -222,9 +224,9 @@ const Leaderboard = {
                 }, 300);
             });
             // Also override the local filter without fetching
-             input.addEventListener('keyup', (e) => {
-                 this.updateTable(e.target.value);
-             });
+            input.addEventListener('keyup', (e) => {
+                this.updateTable(e.target.value);
+            });
         }
     },
 
