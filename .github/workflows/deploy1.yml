@@ -1,0 +1,280 @@
+name: Deploy to EC2 Servers
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Create deployment package
+      run: |
+        echo "Creating deployment package..."
+        mkdir -p deploy_package
+        cp -r backend deploy_package/
+        cp -r frontend deploy_package/
+        cp nginx-optimized.conf deploy_package/
+        cp supervisor-real.conf deploy_package/
+        # Create tarball preserving permissions
+        tar -czf app.tar.gz -C deploy_package .
+        echo "Package created: $(du -h app.tar.gz | cut -f1)"
+
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh/
+        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key.pem
+        chmod 600 ~/.ssh/deploy_key.pem
+        
+    - name: Deploy to Master Server
+      run: |
+        SERVER_IP="${{ secrets.MASTER_IP }}"
+        echo "Deploying to Master ($SERVER_IP)..."
+        
+        # Upload
+        scp -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no app.tar.gz ubuntu@${SERVER_IP}:/tmp/
+        
+        # Execute remote commands
+        ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no ubuntu@${SERVER_IP} '
+          set -e
+          sudo mkdir -p /opt/debug-marathon
+          sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
+          
+          # Install dependencies
+          cd /opt/debug-marathon/backend
+          if [ -f requirements.txt ]; then
+              sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed
+          fi
+          
+          # Initialize Database (Self-healing for missing tables)
+          echo "Run DB Setup..."
+          # Fix: script is in current dir (/opt/debug-marathon/backend)
+          sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
+
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
+          # Restart services
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
+          sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
+          sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
+          
+          # Verify Health
+          echo "Verifying service health..."
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
+          
+          rm /tmp/app.tar.gz
+          echo "Deployment to Master completed."
+        '
+
+    - name: Deploy to Worker 1
+      run: |
+        SERVER_IP="${{ secrets.WORKER1_IP }}"
+        echo "Deploying to Worker 1 ($SERVER_IP)..."
+        
+        scp -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no app.tar.gz ubuntu@${SERVER_IP}:/tmp/
+        ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no ubuntu@${SERVER_IP} '
+          set -e
+          sudo mkdir -p /opt/debug-marathon
+          sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
+          cd /opt/debug-marathon/backend
+          if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
+          
+          
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
+          sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
+          sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
+          
+          # Verify Health
+          echo "Verifying service health..."
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
+          rm /tmp/app.tar.gz
+          echo "Deployment to Worker 1 completed."
+        '
+
+    - name: Deploy to Worker 2
+      run: |
+        SERVER_IP="${{ secrets.WORKER2_IP }}"
+        echo "Deploying to Worker 2 ($SERVER_IP)..."
+        
+        scp -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no app.tar.gz ubuntu@${SERVER_IP}:/tmp/
+        ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no ubuntu@${SERVER_IP} '
+          set -e
+          sudo mkdir -p /opt/debug-marathon
+          sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
+          cd /opt/debug-marathon/backend
+          if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
+          
+          
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
+          sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
+          sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
+          
+          # Verify Health
+          echo "Verifying service health..."
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
+          rm /tmp/app.tar.gz
+          echo "Deployment to Worker 2 completed."
+        '
+
+    - name: Deploy to Worker 3
+      run: |
+        SERVER_IP="${{ secrets.WORKER3_IP }}"
+        echo "Deploying to Worker 3 ($SERVER_IP)..."
+        
+        scp -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no app.tar.gz ubuntu@${SERVER_IP}:/tmp/
+        ssh -i ~/.ssh/deploy_key.pem -o StrictHostKeyChecking=no ubuntu@${SERVER_IP} '
+          set -e
+          sudo mkdir -p /opt/debug-marathon
+          sudo tar -xzf /tmp/app.tar.gz -C /opt/debug-marathon
+          cd /opt/debug-marathon/backend
+          if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
+          
+          
+          # Setup logging and supervisor
+          sudo mkdir -p /var/log/debug-marathon
+          sudo chown ubuntu:ubuntu /var/log/debug-marathon
+          sudo cp /opt/debug-marathon/supervisor-real.conf /etc/supervisor/conf.d/debug-marathon.conf
+          
+          sudo cp /opt/debug-marathon/nginx-optimized.conf /etc/nginx/conf.d/debug-marathon.conf
+          sudo supervisorctl reread
+          sudo supervisorctl update
+          sudo supervisorctl restart debug-marathon || true
+          sudo rm -f /etc/nginx/conf.d/optimization.conf
+          sudo systemctl restart nginx || (echo "Nginx failed:" && sudo systemctl status nginx.service && sudo journalctl -xeu nginx.service && exit 1)
+          
+          # Verify Health
+          echo "Verifying service health..."
+          for i in {1..6}; do
+              if sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+                  echo "✅ debug-marathon is RUNNING"
+                  break
+              fi
+              echo "Waiting for service to start... ($i/6)"
+              sleep 5
+          done
+          
+          if ! sudo supervisorctl status debug-marathon | grep -q "RUNNING"; then
+              echo "❌ CRITICAL: debug-marathon is NOT RUNNING"
+              sudo supervisorctl status debug-marathon
+              echo "--- STDOUT LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/out.log
+              echo "--- STDERR LOG ---"
+              sudo tail -n 20 /var/log/debug-marathon/err.log
+              exit 1
+          fi
+          
+          if ! curl -s http://127.0.0.1:5000/api/health > /dev/null; then
+               echo "❌ CRITICAL: App running but not reachable on port 5000"
+               echo "--- FLASK ERROR LOGS ---"
+               sudo tail -n 50 /var/log/debug-marathon/err.log
+               exit 1
+          fi
+          echo "✅ Service is HEALTHY"
+          rm /tmp/app.tar.gz
+          echo "Deployment to Worker 3 completed."
+        '
+
+    - name: Verification
+      run: |
+        echo "Deployment completed to all servers."
