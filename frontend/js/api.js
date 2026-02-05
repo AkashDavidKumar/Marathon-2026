@@ -15,9 +15,7 @@ const API = {
 
         // If we are on Render, absolute URL is safer for cross-origin
         if (host.includes('onrender.com')) {
-            // Note: If your backend has a suffix like 'marathon-backend-x8y2', 
-            // update this string or we use relative if same domain (but blueprint uses separate)
-            const backendUrl = 'https://marathon-backend.onrender.com/api';
+            const backendUrl = 'https://marathon-backend-crn7.onrender.com/api';
             console.log("Using Render Production API:", backendUrl);
             return backendUrl;
         }
