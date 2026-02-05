@@ -1,5 +1,7 @@
 
-# db_connection.py (Modified for SQLite Fallback)
+# db_connection.py
+# Universal Database Manager supporting MySQL, PostgreSQL, and SQLite fallback
+# Auto-detects based on DATABASE_URL environment variable
 
 import logging
 import os
@@ -12,24 +14,123 @@ load_dotenv()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger("DatabaseManager")
 
 # --- AUTO-DETECTION ---
-USE_SQLITE = False
+# Look for connection strings in multiple common env vars
+DATABASE_URL = os.getenv('DATABASE_URL') or os.getenv('INTERNAL_DATABASE_URL') or os.getenv('DB_URL')
+USE_POSTGRES = DATABASE_URL and (DATABASE_URL.startswith('postgres') or DATABASE_URL.startswith('postgresql'))
+USE_SQLITE = os.getenv('USE_SQLITE', 'False') == 'True'
 
+if not USE_POSTGRES:
+    logger.info(f"PostgreSQL not detected (DATABASE_URL is {'empty' if not DATABASE_URL else 'invalid'}).")
+
+# Check dependencies
 try:
-    import mysql.connector
-    from mysql.connector import pooling, Error
-    # Test connection? No, just assume success until retry fails
-except ImportError:
-    logger.warning("mysql.connector not found. Falling back to SQLite.")
+    if USE_POSTGRES:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        from psycopg2 import pool
+        logger.info("🐘 PostgreSQL driver (psycopg2) loaded successfully.")
+    else:
+        import mysql.connector
+        from mysql.connector import pooling, Error
+except ImportError as e:
+    logger.warning(f"❌ DB driver not found ({e}). Falling back to SQLite.")
+    USE_POSTGRES = False # Force fallback if driver is missing
     USE_SQLITE = True
 
+class PostgreSQLManager:
+    """PostgreSQL Database Manager for Railway/Render deployments"""
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(PostgreSQLManager, cls).__new__(cls)
+            cls._instance._initialize_pool()
+        return cls._instance
+
+    def _initialize_pool(self):
+        try:
+            # Handle Render/Railway 'postgres://' vs 'postgresql://'
+            conn_url = DATABASE_URL
+            if conn_url.startswith('postgres://'):
+                conn_url = conn_url.replace('postgres://', 'postgresql://', 1)
+                
+            self.pool = psycopg2.pool.SimpleConnectionPool(
+                1, 20, # min and max connections
+                conn_url
+            )
+            logger.info("✅ PostgreSQL connection pool initialized (1-20 connections)")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize PostgreSQL pool: {e}")
+            raise
+
+    def get_connection(self):
+        try:
+            return self.pool.getconn()
+        except Exception as e:
+            logger.error(f"Failed to get PostgreSQL connection: {e}")
+            return None
+
+    def execute_query(self, query, params=None):
+        conn = self.get_connection()
+        if not conn: return None
+        
+        cursor = None
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(query, params or ())
+            result = cursor.fetchall()
+            return [dict(row) for row in result]
+        except Exception as e:
+            logger.error(f"PostgreSQL SELECT failed: {e}\nQuery: {query}")
+            return None
+        finally:
+            if cursor: cursor.close()
+            if conn: self.pool.putconn(conn)
+
+    def execute_update(self, query, params=None):
+        conn = self.get_connection()
+        if not conn: return False
+        
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(query, params or ())
+            conn.commit()
+            # PostgreSQL doesn't have lastrowid in the same way, but often returns it via RETURNING
+            # This is a generic wrapper, so we do our best
+            return {"last_id": None, "affected": cursor.rowcount}
+        except Exception as e:
+            if conn: conn.rollback()
+            logger.error(f"PostgreSQL UPDATE failed: {e}\nQuery: {query}")
+            return False
+        finally:
+            if cursor: cursor.close()
+            if conn: self.pool.putconn(conn)
+
+    def init_database(self, schema_file):
+        conn = self.get_connection()
+        if not conn: return False
+        cursor = conn.cursor()
+        try:
+            with open(schema_file, 'r') as f:
+                sql = f.read()
+            cursor.execute(sql)
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"PostgreSQL Init failed: {e}")
+            return False
+        finally:
+            cursor.close()
+            self.pool.putconn(conn)
+
 class MySQLManager:
+    """MySQL Database Manager for local/AWS deployments"""
     _instance = None
     
     def __new__(cls):
@@ -53,26 +154,14 @@ class MySQLManager:
                 "collation": "utf8mb4_unicode_ci"
             }
             
-            # Ini overrides defaults, but ENV should override INI in a pure 12-factor app?
-            # User Task: "Move the database root password... into a .env file... load them."
-            # So Env > Ini.
-            
             if os.path.exists(config_path):
                 config.read(config_path)
                 if 'mysql' in config:
                     read_config = dict(config['mysql'])
-                    # Filter keys
                     for key in ['pool_name', 'pool_size', 'pool_reset_session']:
                         read_config.pop(key, None)
-                    # Update base with INI? No, Env should win.
-                    # Logic: Base (Env or Default) -> Update with INI (Legacy) -> Override with explicit Env if present?
-                    # Let's assume INI is legacy/local. ENV is prod.
-                    # If Env vars are set, they satisfy base_config.
-                    # Let's just use Env vars if they exist, else INI.
-                    # Simple way: Load INI first, then Env overrides.
                     base_config.update(read_config)
 
-            # Override with Env if explicitly set (Reloading Env to be sure)
             if os.getenv('DB_HOST'): base_config['host'] = os.getenv('DB_HOST')
             if os.getenv('DB_USER'): base_config['user'] = os.getenv('DB_USER')
             if os.getenv('DB_PASSWORD') is not None: base_config['password'] = os.getenv('DB_PASSWORD')
@@ -84,192 +173,98 @@ class MySQLManager:
                 full_config = base_config.copy()
                 full_config['database'] = target_db
                 self.pool = mysql.connector.pooling.MySQLConnectionPool(
-                    pool_name=f"debug_marathon_pool_{self.pid}",
-                    pool_size=20, # Optimized for m5.large with better RDS performance
+                    pool_name=f"marathon_pool_{self.pid}",
+                    pool_size=20,
                     pool_reset_session=True,
-                    connection_timeout=10, # Reduced for faster failover in Multi-AZ
+                    connection_timeout=10,
                     autocommit=False,
-                    use_pure=False, # Use C extension for better performance
+                    use_pure=False,
                     **full_config
                 )
-                logger.info(f"Connection pool initialized with database '{target_db}' for PID {self.pid}. Pool size: 20")
+                logger.info(f"✅ MySQL pool initialized with database '{target_db}'")
             except Error as e:
-                if e.errno == 1049: # Unknown database
-                    logger.warning(f"Database '{target_db}' not found. Connecting to server only.")
-                    base_config.pop('database', None)
+                if e.errno == 1049:
+                    logger.warning(f"Database '{target_db}' not found. Connecting to server.")
                     self.pool = mysql.connector.pooling.MySQLConnectionPool(
-                        pool_name=f"debug_marathon_pool_{self.pid}",
-                        pool_size=20, # Optimized pool size
-                        pool_reset_session=True,
-                        connection_timeout=10,
-                        use_pure=False,
+                        pool_name=f"marathon_pool_{self.pid}",
+                        pool_size=20,
                         **base_config
                     )
-                else:
-                    raise
+                else: raise
         except Error as e:
-            logger.error(f"Error initializing connection pool: {e}")
+            logger.error(f"Error initializing MySQL pool: {e}")
             raise
 
     def get_connection(self):
-        # Fork detection: If PID changed, our pool is invalid (shared socket). Reset it.
         if getattr(self, 'pid', None) != os.getpid():
-            logger.warning(f"Fork detected (Parent PID: {getattr(self, 'pid', '?')} -> Child PID: {os.getpid()}). Re-initializing pool.")
             self._initialize_pool()
-
         try:
             conn = self.pool.get_connection()
             if conn.is_connected():
-                # Aggressive ping to ensure connection in multi-AZ/multi-server environment
-                try:
-                    conn.ping(reconnect=True, attempts=2, delay=1) # Reduced retries
-                except Error:
-                    # If ping fails, force a new connection if possible or retry
-                    logger.warning("Connection ping failed, attempting reconnect...")
-                    conn.reconnect(attempts=2, delay=1)
+                conn.ping(reconnect=True)
                 return conn
-            else:
-                try:
-                    conn.reconnect(attempts=2, delay=1)
-                    return conn
-                except:
-                    return None
-        except Error as e:
-            logger.error(f"Failed to get connection from pool: {e}")
             return None
+        except Error: return None
 
     def execute_query(self, query, params=None):
         conn = self.get_connection()
-        if not conn: 
-            # FLICKER FIX: If connection fails, try to serve strict cache from memory if available
-            # This prevents UI going blank during brief DB blips.
-            # Assuming self._query_cache exists (we will initialize it)
-            if hasattr(self, '_query_cache'):
-                cache_key = f"{query}:{str(params)}"
-                if cache_key in self._query_cache:
-                    logger.warning(f"DB Connection failed, serving cached data for: {query[:50]}...")
-                    return self._query_cache[cache_key]['data']
-            return None
-        
-        # --- Simple Caching ---
-        # Initialize cache if not present
-        if not hasattr(self, '_query_cache'):
-             self._query_cache = {}
-
-        cache_key = f"{query}:{str(params)}"
-        import time
-        now = time.time()
-        
-        # Serve from cache if fresh (< 2 seconds) to reduce heavy load and flicker
-        if cache_key in self._query_cache:
-            entry = self._query_cache[cache_key]
-            if now - entry['time'] < 2.0: # 2 second cache duration
-                return entry['data']
-        # Only cache simple SELECTs without user-specific params if needed, 
-        # but for now, let's keep it safe and just execute.
-        # To add simple caching:
-        # cache_key = f"{query}:{str(params)}"
-        # if cache_key in self._query_cache: return self._query_cache[cache_key]
-
+        if not conn: return None
         cursor = conn.cursor(dictionary=True)
         try:
-            import time
-            start_t = time.time()
             cursor.execute(query, params or ())
-            result = cursor.fetchall()
-            dur = (time.time() - start_t) * 1000
-            if dur > 100:
-                logger.warning(f"⚠️ SLOW QUERY ({dur:.2f}ms): {query[:200]}...")
-            
-            # Save to cache
-            if hasattr(self, '_query_cache'):
-                self._query_cache[cache_key] = {'data': result, 'time': time.time()}
-                
-            return result
+            return cursor.fetchall()
         except Error as e:
-            logger.error(f"SELECT Query failed: {e}\nQuery: {query}")
+            logger.error(f"MySQL SELECT failed: {e}")
             return None
         finally:
-            if cursor:
-                try: cursor.close()
-                except: pass
-            if conn:
-                try: conn.close()
-                except: pass
+            if cursor: cursor.close()
+            if conn: conn.close()
 
     def execute_update(self, query, params=None):
         conn = self.get_connection()
         if not conn: return False
-        
         cursor = conn.cursor()
         try:
             cursor.execute(query, params or ())
             conn.commit()
             return {"last_id": cursor.lastrowid, "affected": cursor.rowcount}
         except Error as e:
-            conn.rollback()
-            logger.error(f"UPDATE Query failed: {e}\nQuery: {query}")
-            return False
-        finally:
-            if cursor:
-                try: cursor.close()
-                except: pass
-            if conn:
-                try: conn.close()
-                except: pass
-
-    def init_database(self, schema_file):
-        if not os.path.exists(schema_file):
-            logger.error(f"Schema file not found: {schema_file}")
-            return False
-        
-        conn = self.get_connection()
-        if not conn: return False
-        
-        cursor = conn.cursor()
-        try:
-            with open(schema_file, 'r') as f:
-                sql = f.read()
-            statements = sql.split(';')
-            for statement in statements:
-                if statement.strip():
-                    cursor.execute(statement)
-            conn.commit()
-            logger.info("Database initialized successfully.")
-            return True
-        except Error as e:
-            logger.error(f"Failed to initialize database: {e}")
+            if conn: conn.rollback()
+            logger.error(f"MySQL UPDATE failed: {e}")
             return False
         finally:
             if cursor: cursor.close()
             if conn: conn.close()
-            
-    def upsert(self, table, data, conflict_keys):
-        # Default MySQL implementation using ON DUPLICATE KEY UPDATE (manual Construction)
-        # This is a fallback helper
-        keys = list(data.keys())
-        columns = ', '.join(keys)
-        placeholders = ', '.join(['%s'] * len(keys))
-        
-        update_clause = ', '.join([f"{k}=VALUES({k})" for k in keys if k not in conflict_keys])
-        
-        if not update_clause:
-            # Just INSERT IGNORE
-            sql = f"INSERT IGNORE INTO {table} ({columns}) VALUES ({placeholders})"
-        else:
-            sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders}) ON DUPLICATE KEY UPDATE {update_clause}"
-        
-        vals = tuple(data.values())
-        return self.execute_update(sql, vals)
 
-# --- FACTORY ---
+    def init_database(self, schema_file):
+        conn = self.get_connection()
+        if not conn: return False
+        cursor = conn.cursor()
+        try:
+            with open(schema_file, 'r') as f:
+                sql = f.read()
+            for statement in sql.split(';'):
+                if statement.strip():
+                    cursor.execute(statement)
+            conn.commit()
+            return True
+        except Error as e:
+            logger.error(f"MySQL Init failed: {e}")
+            return False
+        finally:
+            cursor.close()
+            conn.close()
 
+# --- FACTORY SELECTION ---
 try:
-    # Try initializing MySQL Manager
-    if not USE_SQLITE:
-        _temp = MySQLManager()
-    db_manager = _temp
+    if USE_POSTGRES:
+        db_manager = PostgreSQLManager()
+    elif USE_SQLITE:
+        from db_sqlite import sqlite_manager
+        db_manager = sqlite_manager
+    else:
+        db_manager = MySQLManager()
 except Exception as e:
-    logger.warning(f"MySQL Connection Failed ({e}). Switching to SQLite.")
+    logger.warning(f"Preferred DB failed ({e}). Switching to SQLite fallback.")
     from db_sqlite import sqlite_manager
     db_manager = sqlite_manager
