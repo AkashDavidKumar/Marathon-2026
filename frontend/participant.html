@@ -510,7 +510,9 @@
 
             initSocketIO() {
                 if (typeof io === 'undefined') return;
-                const socket = io();
+                const socketUrl = API.BASE_URL.replace('/api', '');
+                console.log("Connecting Socket.IO to:", socketUrl);
+                const socket = io(socketUrl);
 
                 socket.on('connect', () => {
                     document.getElementById('connection-status').innerText = 'Live';
@@ -1068,13 +1070,13 @@
             async runCode() {
                 if (this.isThrottled) return;
                 const q = this.questions[this.currentQId];
-                
+
                 // Enhanced validation
                 if (!q) {
                     document.getElementById('console-output').innerHTML = '<div class="error-msg">Error: Current question context invalid. Refresh page.</div>';
                     return;
                 }
-                
+
                 if (!q.id) {
                     console.error('Question object missing ID:', q);
                     document.getElementById('console-output').innerHTML = '<div class="error-msg">Error: Question ID is missing. Please refresh the page.</div>';
@@ -1091,20 +1093,20 @@
                 try {
                     // Ensure question_id is properly formatted
                     const questionId = Number(q.id) || q.id;
-                    
+
                     console.log('Sending run request with:', {
                         question_id: questionId,
                         contest_id: this.activeContestId,
                         level: this.currentLevel,
                         user_id: this.user.participant_id
                     });
-                    
+
                     const res = await API.request('/contest/run', 'POST', {
-                        code: code, 
+                        code: code,
                         language: this.allowedLanguage,
                         question_id: questionId,
                         user_id: this.user.participant_id,
-                        contest_id: this.activeContestId, 
+                        contest_id: this.activeContestId,
                         level: this.currentLevel
                     });
 
@@ -1116,19 +1118,19 @@
                         // Handle specific backend errors
                         console.error('Backend error:', res.error, res.debug_info);
                         let errorMsg = res.error;
-                        
+
                         // Add helpful context if debug info is available
                         if (res.debug_info) {
                             errorMsg += `<br><small style="opacity: 0.8;">Requested ID: ${res.debug_info.requested_id}, Contest: ${res.debug_info.contest_id}, Level: ${res.debug_info.level}</small>`;
                         }
-                        
+
                         outDiv.innerHTML = `<div class="error-msg">${errorMsg}</div>`;
                     } else {
                         outDiv.innerHTML = `<div class="error-msg">Execution Error: Unknown Backend Response</div>`;
                     }
-                } catch (e) { 
+                } catch (e) {
                     console.error('Run code error:', e);
-                    outDiv.innerHTML = `<div class="error-msg">Connection Error: ${e.message}</div>`; 
+                    outDiv.innerHTML = `<div class="error-msg">Connection Error: ${e.message}</div>`;
                 }
             },
 

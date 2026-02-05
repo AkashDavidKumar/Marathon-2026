@@ -370,8 +370,16 @@
 
         async function fetchContestData() {
             try {
+                // Determine API BASE URL
+                const host = window.location.hostname;
+                let apiBaseUrl = '/api';
+                if (host.includes('onrender.com')) {
+                    apiBaseUrl = 'https://marathon-backend-crn7.onrender.com/api';
+                }
+                console.log("Using API Base:", apiBaseUrl);
+
                 // Fetch list of contests
-                const contestsRes = await fetch('/api/contest/');
+                const contestsRes = await fetch(`${apiBaseUrl}/contest/`);
                 const contestsData = await contestsRes.json();
                 const contests = contestsData.contests || [];
 
@@ -387,7 +395,7 @@
                 updateHeroUI(activeContest);
 
                 // Fetch rounds for the contest (using public endpoint)
-                const roundsRes = await fetch(`/api/contest/${activeContest.id}/rounds/public`);
+                const roundsRes = await fetch(`${apiBaseUrl}/contest/${activeContest.id}/rounds/public`);
 
                 if (roundsRes.ok) {
                     const roundsData = await roundsRes.json();
@@ -396,7 +404,7 @@
                 }
 
                 // Fetch supported languages from questions
-                const questionsRes = await fetch('/api/contest/questions');
+                const questionsRes = await fetch(`${apiBaseUrl}/contest/questions`);
                 if (questionsRes.ok) {
                     const questionsData = await questionsRes.json();
                     const questions = questionsData.questions || [];
