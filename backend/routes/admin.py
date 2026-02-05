@@ -32,6 +32,7 @@ def get_stats():
 @admin_required
 def get_participants():
     # Fetch participants with detailed info
+    # Ensure GROUP BY covers all non-aggregated columns used in SELECT
     query = """
         SELECT u.user_id, u.username, u.full_name, u.email, u.phone, u.college, u.department, u.status, COALESCE(SUM(s.score_awarded), 0) as score
         FROM users u
@@ -133,9 +134,10 @@ def create_participant():
                     db_manager.execute_update(update_q, tuple(update_vals))
                     return jsonify({'success': True, 'participant': new_user, 'status': 'updated'})
                 else:
-                    return jsonify({'success': True, 'participant': new_user, 'status': 'no_changes'})
+                     return jsonify({'success': True, 'participant': new_user, 'status': 'no_changes'})
 
             if manual_mode:
+                # If auto-generated ID conflicts, try one more time or fail
                 return jsonify({'error': 'System generated duplicate ID. Please try again.'}), 409
             else:
                 return jsonify({'error': f"Participant ID '{username}' already exists."}), 409
@@ -195,9 +197,17 @@ def delete_all_participants():
 # === Question Management ===
 
 @bp.route('/questions', methods=['GET'])
+@bp.route('/questions', methods=['GET'])
 @admin_required
 def get_questions():
-    raw_data = db_manager.execute_query("SELECT * FROM questions")
+    # Join with Rounds to get the actual Round Number (Level)
+    query = """
+        SELECT q.*, r.round_number 
+        FROM questions q
+        JOIN rounds r ON q.round_id = r.round_id
+        ORDER BY r.round_number, q.question_number
+    """
+    raw_data = db_manager.execute_query(query)
     
     formatted = []
     if raw_data:
@@ -209,7 +219,7 @@ def get_questions():
                 'difficulty': q.get('difficulty_level'),
                 'expected_output': q.get('expected_output'),
                 'test_cases': q.get('test_cases'),
-                'round_number': q.get('round_id'), # Simplified
+                'round_number': q.get('round_number'), 
                 'round_id': q.get('round_id')
             })
         
@@ -315,11 +325,20 @@ def update_question(qid):
     
     if 'round_number' in data:
         # Need to get the round_id from round_number
-        round_query = "SELECT round_id FROM rounds WHERE round_number=%s LIMIT 1"
-        round_res = db_manager.execute_query(round_query, (data['round_number'],))
-        if round_res:
-            fields.append("round_id=%s")
-            params.append(round_res[0]['round_id'])
+        if isinstance(data['round_number'], int):
+            round_query = "SELECT round_id FROM rounds WHERE round_number=%s LIMIT 1"
+            round_res = db_manager.execute_query(round_query, (data['round_number'],))
+            if round_res:
+                fields.append("round_id=%s")
+                params.append(round_res[0]['round_id'])
+            else:
+                 # Fallback/Error if round not found using number 
+                 pass 
+    
+    if 'round_id' in data:
+         # Direct round_id update if provided
+         fields.append("round_id=%s")
+         params.append(data['round_id'])
     
     if not fields:
         return jsonify({'success': True, 'message': 'No fields to update'})

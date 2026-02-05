@@ -70,12 +70,22 @@ def create_app(config_class=Config):
     app.register_blueprint(participant_bp, url_prefix='/api/participant')
 
     # Health Check Endpoint for AWS Load Balancer
-    @app.route('/api/health')
+@app.route('/api/health')
     def health_check():
+        from db_connection import db_manager
+        db_status = 'unknown'
+        try:
+            # Simple query to verify DB connection
+            res = db_manager.execute_query("SELECT 1")
+            db_status = 'connected' if res else 'error'
+        except Exception as e:
+            db_status = f'error: {str(e)}'
+            
         return jsonify({
             'status': 'healthy',
             'timestamp': datetime.utcnow().isoformat(),
-            'version': '1.0.0'
+            'database': db_status,
+            'version': '1.0.3'
         })
 
     # Serve Static Files
