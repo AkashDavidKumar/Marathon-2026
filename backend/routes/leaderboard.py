@@ -37,7 +37,7 @@ def get_leaderboard():
             FROM submissions s
             JOIN rounds r ON s.round_id = r.round_id
             JOIN participant_level_stats ps_sub ON s.user_id = ps_sub.user_id AND s.contest_id = ps_sub.contest_id AND r.round_number = ps_sub.level
-            WHERE s.is_correct = 1
+            WHERE s.is_correct = TRUE
             GROUP BY s.user_id, s.contest_id, r.round_number
         ) t ON pls.user_id = t.user_id AND pls.contest_id = t.contest_id AND pls.level = t.round_number
         WHERE u.role = 'participant' AND pls.level = %s
@@ -126,7 +126,7 @@ def download_leaderboard_report():
             FROM submissions s
             JOIN rounds r ON s.round_id = r.round_id
             JOIN participant_level_stats ps_sub ON s.user_id = ps_sub.user_id AND s.contest_id = ps_sub.contest_id AND r.round_number = ps_sub.level
-            WHERE s.is_correct = 1
+            WHERE s.is_correct = TRUE
             GROUP BY s.user_id, s.contest_id, r.round_number
         ) t ON pls.user_id = t.user_id AND pls.contest_id = t.contest_id AND pls.level = t.round_number
         WHERE u.role = 'participant' AND pls.level = %s

@@ -84,8 +84,8 @@ def get_proctoring_stats(contest_id):
         SELECT 
             SUM(total_violations) as total_violations,
             COUNT(CASE WHEN risk_level IN ('high', 'critical') THEN 1 END) as active_risky_participants,
-            COUNT(CASE WHEN is_disqualified=1 AND disqualification_reason LIKE 'Auto%' THEN 1 END) as auto_disqualifications,
-            COUNT(CASE WHEN is_disqualified=1 AND disqualification_reason NOT LIKE 'Auto%' THEN 1 END) as manual_disqualifications
+            COUNT(CASE WHEN is_disqualified=TRUE AND disqualification_reason LIKE 'Auto%' THEN 1 END) as auto_disqualifications,
+            COUNT(CASE WHEN is_disqualified=TRUE AND disqualification_reason NOT LIKE 'Auto%' THEN 1 END) as manual_disqualifications
         FROM participant_proctoring
         WHERE contest_id = %s
     """
@@ -242,8 +242,8 @@ def report_violation():
              dq_reason = f"Auto-Disqualified: Exceeded maximum violations ({max_v})"
              dq_q = """
                 UPDATE participant_proctoring 
-                SET is_disqualified=1, disqualification_reason=%s, disqualified_at=NOW()
-                WHERE user_id=%s AND contest_id=%s AND (is_disqualified=0 OR is_disqualified IS NULL)
+                SET is_disqualified=TRUE, disqualification_reason=%s, disqualified_at=CURRENT_TIMESTAMP
+                WHERE user_id=%s AND contest_id=%s AND (is_disqualified=FALSE OR is_disqualified IS NULL)
              """
              db_manager.execute_update(dq_q, (dq_reason, user_id, contest_id))
              return jsonify({'success': True, 'disqualified': True, 'reason': dq_reason})

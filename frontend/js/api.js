@@ -4,7 +4,14 @@
  */
 
 const API = {
-    BASE_URL: '/api',
+    // Dynamic BASE_URL detection
+    BASE_URL: (function () {
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            return '/api'; // Same-origin for local dev
+        }
+        // For hosted environments, try to use relative path first
+        return '/api';
+    })(),
 
     async request(endpoint, method = 'GET', data = null) {
         const headers = { 'Content-Type': 'application/json' };
