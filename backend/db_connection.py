@@ -139,55 +139,48 @@ class MySQLManager:
             return None
 
     def execute_query(self, query, params=None):
-        conn = self.get_connection()
-        if not conn: 
-            # FLICKER FIX: If connection fails, try to serve strict cache from memory if available
-            # This prevents UI going blank during brief DB blips.
-            # Assuming self._query_cache exists (we will initialize it)
-            if hasattr(self, '_query_cache'):
-                cache_key = f"{query}:{str(params)}"
-                if cache_key in self._query_cache:
-                    logger.warning(f"DB Connection failed, serving cached data for: {query[:50]}...")
-                    return self._query_cache[cache_key]['data']
-            return None
-        
-        # --- Simple Caching ---
-        # Initialize cache if not present
+        # 1. Initialize Cache
         if not hasattr(self, '_query_cache'):
              self._query_cache = {}
 
-        cache_key = f"{query}:{str(params)}"
+        # 2. Simple Cache Lookup (Prevent Flickering)
+        # Dashboard stats and participant lists are called frequently in parallel.
+        # We serve a 1-second cache to de-duplicate simultaneous requests.
         import time
+        cache_key = f"{query}:{str(params)}"
         now = time.time()
         
-        # Serve from cache if fresh (< 2 seconds) to reduce heavy load and flicker
         if cache_key in self._query_cache:
             entry = self._query_cache[cache_key]
-            if now - entry['time'] < 2.0: # 2 second cache duration
+            if now - entry['time'] < 1.0: # 1 second de-flicker cache
                 return entry['data']
-        # Only cache simple SELECTs without user-specific params if needed, 
-        # but for now, let's keep it safe and just execute.
-        # To add simple caching:
-        # cache_key = f"{query}:{str(params)}"
-        # if cache_key in self._query_cache: return self._query_cache[cache_key]
 
+        conn = self.get_connection()
+        if not conn: 
+            # FALLBACK: If DB is disconnected, serve last known good data from cache if avail
+            if cache_key in self._query_cache:
+                logger.warning(f"DB Disconnected. Serving stale cache for: {query[:50]}...")
+                return self._query_cache[cache_key]['data']
+            return None
+        
         cursor = conn.cursor(dictionary=True)
         try:
-            import time
             start_t = time.time()
             cursor.execute(query, params or ())
             result = cursor.fetchall()
             dur = (time.time() - start_t) * 1000
-            if dur > 100:
+            
+            if dur > 500: # Threshold for slow query warning
                 logger.warning(f"⚠️ SLOW QUERY ({dur:.2f}ms): {query[:200]}...")
             
             # Save to cache
-            if hasattr(self, '_query_cache'):
-                self._query_cache[cache_key] = {'data': result, 'time': time.time()}
-                
+            self._query_cache[cache_key] = {'data': result, 'time': time.time()}
             return result
         except Error as e:
             logger.error(f"SELECT Query failed: {e}\nQuery: {query}")
+            # Even on error, if we have old data, better to show it than a blank screen
+            if cache_key in self._query_cache:
+                return self._query_cache[cache_key]['data']
             return None
         finally:
             if cursor:

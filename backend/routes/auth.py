@@ -14,7 +14,7 @@ def create_token(user_id, role='participant'):
         'sub': user_id,
         'role': role,
         'iat': datetime.datetime.utcnow(),
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7)
     }
     return jwt.encode(payload, Config.SECRET_KEY, algorithm='HS256')
 
