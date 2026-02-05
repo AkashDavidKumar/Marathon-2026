@@ -18,7 +18,7 @@ services:
         value: '*' # Update this after static site is created
 
   # Static Frontend
-  - type: static
+  - type: static_site
     name: marathon-frontend
     env: static
     buildCommand: "" # No build step needed for plain HTML/JS
