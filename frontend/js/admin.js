@@ -21,13 +21,6 @@ const Admin = {
             // Ensure Login is shown
             this.toggleAdminView(false);
         }
-
-        // Auto-refresh stats occasionally
-        setInterval(() => {
-            if (this.currentView === 'dashboard' && this.activeContestId && localStorage.getItem('admin_token')) {
-                this.updateDashboardStats();
-            }
-        }, 5000);
     },
 
     toggleAdminView(showDashboard) {

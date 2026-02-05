@@ -4,6 +4,9 @@ import datetime
 import time
 import json
 import traceback
+import os
+import subprocess
+import tempfile
 from db_connection import db_manager
 from auth_middleware import admin_required
 from utils.logic import execute_code_internal
@@ -651,6 +654,7 @@ def submit_question():
             'question': f"Q{question_id}",
             'contest_id': contest_id
         })
+        socketio.emit('leaderboard:update', {'contest_id': contest_id})
         
     return jsonify({
         'success': all_passed,
@@ -739,7 +743,7 @@ def get_participant_state():
         global_active_level = 1
         level_duration = 20 # Default
         
-        for r in rounds_res:
+        for r in (rounds_res or []):
             if r['status'] == 'active':
                 global_active_level = r['round_number']
                 break

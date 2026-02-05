@@ -114,9 +114,6 @@ jobs:
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
           
-          # Initialize Database (Self-healing)
-          echo "Run DB Setup..."
-          sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
           
           # Setup logging and supervisor
           sudo mkdir -p /var/log/debug-marathon
@@ -175,9 +172,6 @@ jobs:
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
           
-          # Initialize Database (Self-healing)
-          echo "Run DB Setup..."
-          sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
           
           # Setup logging and supervisor
           sudo mkdir -p /var/log/debug-marathon
@@ -236,9 +230,6 @@ jobs:
           cd /opt/debug-marathon/backend
           if [ -f requirements.txt ]; then sudo pip3 install -r requirements.txt --break-system-packages --ignore-installed --quiet || true; fi
           
-          # Initialize Database (Self-healing)
-          echo "Run DB Setup..."
-          sudo python3 setup_db.py || echo "DB Setup encountered an error/warning but continuing..."
           
           # Setup logging and supervisor
           sudo mkdir -p /var/log/debug-marathon

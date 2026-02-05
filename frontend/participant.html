@@ -501,9 +501,43 @@
                 this.showFullscreenRequestOverlay();
                 await this.syncContestState();
                 await this.fetchAndApplyState();
-                setInterval(() => this.fetchAndApplyState(), 3000);
+
+                // Real-time updates via Socket.IO
                 this.initSocketIO();
+
                 this.enforceFullscreen();
+            },
+
+            initSocketIO() {
+                if (typeof io === 'undefined') return;
+                const socket = io();
+
+                socket.on('connect', () => {
+                    document.getElementById('connection-status').innerText = 'Live';
+                    document.getElementById('connection-status').className = 'badge badge-success';
+                });
+
+                socket.on('disconnect', () => {
+                    document.getElementById('connection-status').innerText = 'Offline';
+                    document.getElementById('connection-status').className = 'badge badge-error';
+                });
+
+                // Trigger State Refresh on specific events
+                const refreshHandler = () => this.fetchAndApplyState();
+
+                socket.on('contest:updated', refreshHandler);
+                socket.on('level:activated', refreshHandler);
+                socket.on('level:completed', refreshHandler);
+                socket.on('level:paused', refreshHandler);
+
+                socket.on('participant:submitted', (data) => {
+                    if (data.participant_id === this.user.participant_id) {
+                        refreshHandler();
+                    }
+                });
+
+                // Listen for specific commands for this user
+                socket.on(`user:${this.user.participant_id}:update`, refreshHandler);
             },
 
             async syncContestState() {
