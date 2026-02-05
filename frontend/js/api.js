@@ -9,6 +9,10 @@ const API = {
         if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
             return '/api'; // Same-origin for local dev
         }
+        // Specific Fix for Render Deployment
+        if (window.location.hostname.includes('onrender.com')) {
+            return 'https://marathon-backend.onrender.com/api';
+        }
         // For hosted environments, try to use relative path first
         return '/api';
     })(),
