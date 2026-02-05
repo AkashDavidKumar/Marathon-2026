@@ -1,0 +1,33 @@
+services:
+  # Python Backend
+  - type: web
+    name: marathon-backend
+    env: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: gunicorn --chdir backend app:app
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: marathon-db
+          property: connectionString
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: '*' # Update this after static site is created
+
+  # Static Frontend
+  - type: static
+    name: marathon-frontend
+    env: static
+    buildCommand: "" # No build step needed for plain HTML/JS
+    publishPath: frontend
+    headers:
+      - path: /*
+        name: Access-Control-Allow-Origin
+        value: '*'
+
+databases:
+  - name: marathon-db
+    plan: free # Free for 90 days
