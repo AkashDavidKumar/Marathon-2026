@@ -70,7 +70,7 @@ def create_app(config_class=Config):
     app.register_blueprint(participant_bp, url_prefix='/api/participant')
 
     # Health Check Endpoint for AWS Load Balancer
-@app.route('/api/health')
+    @app.route('/api/health')
     def health_check():
         from db_connection import db_manager
         db_status = 'unknown'
