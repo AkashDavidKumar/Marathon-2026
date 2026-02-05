@@ -6,14 +6,22 @@
 const API = {
     // Dynamic BASE_URL detection
     BASE_URL: (function () {
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        const host = window.location.hostname;
+        console.log("Detecting API host for:", host);
+
+        if (host === 'localhost' || host === '127.0.0.1') {
             return '/api'; // Same-origin for local dev
         }
-        // Specific Fix for Render Deployment
-        if (window.location.hostname.includes('onrender.com')) {
-            return 'https://marathon-backend.onrender.com/api';
+
+        // If we are on Render, absolute URL is safer for cross-origin
+        if (host.includes('onrender.com')) {
+            // Note: If your backend has a suffix like 'marathon-backend-x8y2', 
+            // update this string or we use relative if same domain (but blueprint uses separate)
+            const backendUrl = 'https://marathon-backend.onrender.com/api';
+            console.log("Using Render Production API:", backendUrl);
+            return backendUrl;
         }
-        // For hosted environments, try to use relative path first
+        // For other hosted environments, try to use relative path first
         return '/api';
     })(),
 
