@@ -36,8 +36,10 @@ const Admin = {
     },
 
     initSocketIO() {
-        // Connect to Socket.IO server (using current host)
-        this.socket = io();
+        // Connect to Socket.IO server (using dynamic backend URL)
+        const socketUrl = API.BASE_URL.replace('/api', '');
+        console.log("Connecting Socket.IO to:", socketUrl);
+        this.socket = io(socketUrl);
 
         // Listen for contest events
         this.socket.on('contest:started', (data) => {
@@ -963,7 +965,7 @@ const Admin = {
                 questions_solved: 0
             };
             let countdown = { active: false };
-            
+
             if (this.activeContestId) {
                 try {
                     const statsRes = await API.request(`/contest/${this.activeContestId}/stats`);
@@ -974,7 +976,7 @@ const Admin = {
                     console.error('Failed to fetch stats:', e);
                     // Stats already has default values
                 }
-                
+
                 try {
                     const rRes = await API.request(`/contest/${this.activeContestId}/rounds`);
                     this.currentRounds = (rRes && rRes.rounds) ? rRes.rounds : [];
@@ -987,7 +989,7 @@ const Admin = {
                 // We added a route: GET /contest/:id/countdown
                 try {
                     countdown = await API.request(`/contest/${this.activeContestId}/countdown`);
-                } catch (e) { 
+                } catch (e) {
                     console.error('Failed to fetch countdown:', e);
                 }
             }
@@ -3099,8 +3101,11 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     const password = document.getElementById('admin-password').value;
 
     try {
+        const loginUrl = `${API.BASE_URL}/auth/admin/login`;
+        console.log("Attempting login at:", loginUrl);
+
         // Call backend admin login API
-        const response = await fetch('/api/auth/admin/login', {
+        const response = await fetch(loginUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
