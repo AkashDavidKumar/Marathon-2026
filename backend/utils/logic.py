@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import os
 import time
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -110,20 +111,28 @@ def execute_local_secure(code, language, input_str):
         return {'success': False, 'error': "Internal Execution Error"}
 
 def run_python(code, input_str, timeout):
-    try:
-        # '-u' for unbuffered output
-        p = subprocess.run(
-            ['python', '-u', '-c', code],
-            input=input_str,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        if p.returncode != 0:
-            return {'success': False, 'output': p.stdout, 'error': p.stderr or "Runtime Error"}
-        return {'success': True, 'output': p.stdout, 'error': None}
-    except subprocess.TimeoutExpired:
-        return {'success': False, 'output': '', 'error': "Time Limit Exceeded"}
+    # Try 'python3' first (more standard on Linux/Render), then fallback to 'python'
+    for cmd in ['python3', 'python']:
+        try:
+            # '-u' for unbuffered output
+            p = subprocess.run(
+                [cmd, '-u', '-c', code],
+                input=input_str,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            if p.returncode != 0:
+                return {'success': False, 'output': p.stdout, 'error': p.stderr or "Runtime Error"}
+            return {'success': True, 'output': p.stdout, 'error': None}
+        except FileNotFoundError:
+            continue
+        except subprocess.TimeoutExpired:
+            return {'success': False, 'output': '', 'error': "Time Limit Exceeded"}
+        except Exception as e:
+            return {'success': False, 'output': '', 'error': f"Python Execution Error: {str(e)}"}
+            
+    return {'success': False, 'output': '', 'error': "Python interpreter (python3/python) not found."}
 
 def run_cpp(code, lang, input_str, timeout):
     compiler = 'gcc' if lang == 'c' else 'g++'
@@ -166,33 +175,36 @@ def run_cpp(code, lang, input_str, timeout):
             return {'success': False, 'output': '', 'error': "Time Limit Exceeded"}
 
 def run_java(code, input_str, timeout):
+    # Extract public class name or default to 'Main'
+    class_name_match = re.search(r'public\s+class\s+([a-zA-Z0-9_$]+)', code)
+    class_name = class_name_match.group(1) if class_name_match else "Main"
+    
     with tempfile.TemporaryDirectory() as tmpdir:
-        src_path = os.path.join(tmpdir, 'Main.java')
-        # Ensure class Main exists. Simple heuristic check.
-        if 'class Main' not in code:
-             # Just a warning or auto-inject? Assuming strict 'Main' requirement.
-             pass
+        src_path = os.path.join(tmpdir, f'{class_name}.java')
 
         with open(src_path, 'w') as f:
             f.write(code)
             
         # Compile
         try:
+            # We don't use --release 8 by default to maintain compatibility with Java 8 environments.
             c_proc = subprocess.run(
-                ['javac', '--release', '8', src_path],
+                ['javac', src_path],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10 # Compile timeout
             )
             if c_proc.returncode != 0:
                  return {'success': False, 'output': '', 'error': "Compilation Error:\n" + c_proc.stderr}
-        except:
-             return {'success': False, 'output': '', 'error': "Java Compiler not found."}
+        except FileNotFoundError:
+             return {'success': False, 'output': '', 'error': "Java Compiler (javac) not found. Please ensure JDK is installed."}
+        except Exception as e:
+             return {'success': False, 'output': '', 'error': f"Internal Compiler Error: {str(e)}"}
 
         # Run
         try:
             r_proc = subprocess.run(
-                ['java', '-cp', tmpdir, 'Main'],
+                ['java', '-cp', tmpdir, class_name],
                 input=input_str,
                 capture_output=True,
                 text=True,
@@ -201,8 +213,12 @@ def run_java(code, input_str, timeout):
             if r_proc.returncode != 0:
                 return {'success': False, 'output': r_proc.stdout, 'error': r_proc.stderr or "Runtime Error"}
             return {'success': True, 'output': r_proc.stdout, 'error': None}
+        except FileNotFoundError:
+            return {'success': False, 'output': '', 'error': "Java Runtime (java) not found."}
         except subprocess.TimeoutExpired:
             return {'success': False, 'output': '', 'error': "Time Limit Exceeded"}
+        except Exception as e:
+            return {'success': False, 'output': '', 'error': f"Internal Execution Error: {str(e)}"}
 
 def run_node(code, input_str, timeout):
     try:

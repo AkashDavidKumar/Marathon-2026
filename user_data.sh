@@ -11,7 +11,7 @@ date
 # 1. Install Dependencies
 echo "[1/9] Installing System Dependencies..."
 yum update -y
-yum install -y nginx python3-pip unzip aws-cli jq
+yum install -y nginx python3-pip unzip aws-cli jq java-1.8.0-openjdk-devel
 
 # 2. Install Python Packages
 echo "[2/9] Installing Python packages..."
