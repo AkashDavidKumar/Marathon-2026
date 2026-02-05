@@ -13,7 +13,7 @@ class Config:
     SUPABASE_KEY = os.getenv('SUPABASE_KEY')
     
     # Frontend URL for CORS
-    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5000')
+    FRONTEND_URL = os.getenv('ALLOWED_ORIGINS', os.getenv('FRONTEND_URL', '*'))
     
     # Mail Config (Optional placeholder)
     MAIL_SERVER = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
