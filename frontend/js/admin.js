@@ -947,23 +947,49 @@ const Admin = {
             const contests = contestsRes.contests || [];
             const activeContest = contests.find(c => c.status === 'live') || contests[0];
 
+            // Set active contest ID with fallback to 1 if no contests exist
             if (activeContest) {
                 this.activeContestId = activeContest.id;
+            } else {
+                // Fallback to contest ID 1 if no contests found
+                this.activeContestId = 1;
             }
 
-            // Fetch real-time stats
-            let stats = {};
+            // Fetch real-time stats with error handling
+            let stats = {
+                total_participants: 0,
+                active_participants: 0,
+                violations_detected: 0,
+                questions_solved: 0
+            };
             let countdown = { active: false };
+            
             if (this.activeContestId) {
-                stats = await API.request(`/contest/${this.activeContestId}/stats`);
-                const rRes = await API.request(`/contest/${this.activeContestId}/rounds`);
-                this.currentRounds = (rRes && rRes.rounds) ? rRes.rounds : [];
+                try {
+                    const statsRes = await API.request(`/contest/${this.activeContestId}/stats`);
+                    if (statsRes) {
+                        stats = statsRes;
+                    }
+                } catch (e) {
+                    console.error('Failed to fetch stats:', e);
+                    // Stats already has default values
+                }
+                
+                try {
+                    const rRes = await API.request(`/contest/${this.activeContestId}/rounds`);
+                    this.currentRounds = (rRes && rRes.rounds) ? rRes.rounds : [];
+                } catch (e) {
+                    console.error('Failed to fetch rounds:', e);
+                    this.currentRounds = [];
+                }
 
                 // Fetch Countdown State using separate endpoint or extracting from stats if added
                 // We added a route: GET /contest/:id/countdown
                 try {
                     countdown = await API.request(`/contest/${this.activeContestId}/countdown`);
-                } catch (e) { }
+                } catch (e) { 
+                    console.error('Failed to fetch countdown:', e);
+                }
             }
 
             const html = `

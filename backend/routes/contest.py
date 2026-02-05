@@ -357,14 +357,14 @@ def run_code():
     level = data.get('level', 1)
     
     if not question_id:
-        return jsonify({'error': 'Question ID missing'}), 400
+        return jsonify({'error': 'Question ID missing', 'success': False}), 400
 
     print(f"RUN CODE: Fetching Question ID: {question_id} (Type: {type(question_id)})")
 
     # 1. Fetch Question & Config
     # Join with rounds to get allowed_language STRICTLY
     query = """
-        SELECT q.test_input, q.expected_output, q.test_cases, r.allowed_language
+        SELECT q.question_id, q.test_input, q.expected_output, q.test_cases, r.allowed_language
         FROM questions q
         LEFT JOIN rounds r ON q.round_id = r.round_id
         WHERE q.question_id = %s
@@ -377,14 +377,47 @@ def run_code():
     if not q_res:
         try:
             if str(question_id).isdigit():
+                print(f"RUN CODE: Retrying with int conversion: {int(question_id)}")
                 q_res = db_manager.execute_query(query, (int(question_id),))
             else:
+                print(f"RUN CODE: Retrying with string: {str(question_id)}")
                 q_res = db_manager.execute_query(query, (str(question_id),))
-        except: pass
+        except Exception as retry_err:
+            print(f"RUN CODE: Retry failed: {retry_err}")
         
     if not q_res:
-        print(f"RUN CODE WARN: Question ID {question_id} NOT FOUND in DB.")
-        return jsonify({'error': 'Question not found', 'success': False})
+        # Enhanced error message with debugging info
+        print(f"RUN CODE ERROR: Question ID {question_id} NOT FOUND in DB.")
+        print(f"  - Contest ID: {contest_id}, Level: {level}")
+        print(f"  - User ID: {user_id}")
+        
+        # Try to fetch available questions for this level to help debug
+        debug_query = """
+            SELECT q.question_id, q.question_title
+            FROM questions q
+            JOIN rounds r ON q.round_id = r.round_id
+            WHERE r.contest_id = %s AND r.round_number = %s
+            LIMIT 5
+        """
+        debug_res = db_manager.execute_query(debug_query, (contest_id, level))
+        if debug_res:
+            available_ids = [str(dq['question_id']) for dq in debug_res]
+            print(f"  - Available question IDs for this level: {', '.join(available_ids)}")
+        else:
+            print(f"  - No questions found for contest {contest_id}, level {level}")
+        
+        return jsonify({
+            'error': f'Question not found (ID: {question_id}). Please refresh the page and try again.',
+            'success': False,
+            'debug_info': {
+                'requested_id': question_id,
+                'contest_id': contest_id,
+                'level': level
+            }
+        }), 404
+    
+    question = q_res[0]
+    print(f"RUN CODE: Found question ID {question['question_id']}")
     
     question = q_res[0]
 
@@ -1115,26 +1148,42 @@ def get_rounds(contest_id):
 def get_contest_stats(contest_id):
     # Calculate stats for the specific contest
     
-    # 1. Total Participants (Registered)
-    p_query = "SELECT COUNT(*) as count FROM users WHERE role='participant'"
-    p_res = db_manager.execute_query(p_query)
-    total = p_res[0]['count'] if p_res else 0
+    # 1. Total Participants (Registered) - Count all participants who have any activity in this contest
+    # First try to count participants who have started any level in this contest
+    p_query = """
+        SELECT COUNT(DISTINCT pls.user_id) as count 
+        FROM participant_level_stats pls
+        JOIN users u ON pls.user_id = u.user_id
+        WHERE pls.contest_id=%s AND u.role='participant'
+    """
+    p_res = db_manager.execute_query(p_query, (contest_id,))
+    total = p_res[0]['count'] if (p_res and p_res[0]['count']) else 0
+    
+    # If no participants in level stats, count all registered participants as fallback
+    if total == 0:
+        fallback_query = "SELECT COUNT(*) as count FROM users WHERE role='participant'"
+        fallback_res = db_manager.execute_query(fallback_query)
+        total = fallback_res[0]['count'] if (fallback_res and fallback_res[0]['count']) else 0
     
     # 2. Active (Online/Heartbeat recently or In Progress status)
-    # let's assume 'IN_PROGRESS' in level stats means active
-    a_query = "SELECT COUNT(DISTINCT user_id) as count FROM participant_level_stats WHERE contest_id=%s AND status='IN_PROGRESS'"
+    # Count participants currently in progress for this contest
+    a_query = """
+        SELECT COUNT(DISTINCT user_id) as count 
+        FROM participant_level_stats 
+        WHERE contest_id=%s AND status='IN_PROGRESS'
+    """
     a_res = db_manager.execute_query(a_query, (contest_id,))
-    active = a_res[0]['count'] if a_res else 0
+    active = a_res[0]['count'] if (a_res and a_res[0]['count']) else 0
     
     # 3. Violations (Total in this contest)
     v_query = "SELECT COUNT(*) as count FROM violations WHERE contest_id=%s"
     v_res = db_manager.execute_query(v_query, (contest_id,))
-    viols = v_res[0]['count'] if v_res else 0
+    viols = v_res[0]['count'] if (v_res and v_res[0]['count']) else 0
     
-    # 4. Solved (Total passed submissions)
+    # 4. Solved (Total passed submissions for this contest)
     s_query = "SELECT COUNT(*) as count FROM submissions WHERE contest_id=%s AND is_correct=1"
     s_res = db_manager.execute_query(s_query, (contest_id,))
-    solved = s_res[0]['count'] if s_res else 0
+    solved = s_res[0]['count'] if (s_res and s_res[0]['count']) else 0
     
     # Get Configured Wait Time + Countdown Status
     cd_key = f"contest_{contest_id}_countdown"
