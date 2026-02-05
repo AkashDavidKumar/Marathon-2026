@@ -187,12 +187,31 @@ def run_java(code, input_str, timeout):
             
         # Compile
         try:
-            # We don't use --release 8 by default to maintain compatibility with Java 8 environments.
+            # Find javac path
+            javac_cmd = 'javac'
+            # Check if javac is in common paths as fallback
+            common_paths = [
+                '/usr/bin/javac',
+                '/usr/lib/jvm/java-11-openjdk-amd64/bin/javac',
+                '/usr/lib/jvm/java-8-openjdk-amd64/bin/javac',
+                '/usr/lib/jvm/java-11-amazon-corretto.x86_64/bin/javac',
+                '/usr/local/bin/javac'
+            ]
+            
+            # Simple check if javac is available in default path
+            try:
+                subprocess.run(['javac', '-version'], capture_output=True)
+            except FileNotFoundError:
+                for path in common_paths:
+                    if os.path.exists(path):
+                        javac_cmd = path
+                        break
+
             c_proc = subprocess.run(
-                ['javac', src_path],
+                [javac_cmd, src_path],
                 capture_output=True,
                 text=True,
-                timeout=10 # Compile timeout
+                timeout=15 # Increased timeout for slow disks
             )
             if c_proc.returncode != 0:
                  return {'success': False, 'output': '', 'error': "Compilation Error:\n" + c_proc.stderr}
