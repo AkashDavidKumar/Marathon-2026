@@ -18,11 +18,11 @@ services:
         value: '*' # Update this after static site is created
 
   # Static Frontend
-  - type: static_site
+  - type: web
     name: marathon-frontend
     env: static
-    buildCommand: "" # No build step needed for plain HTML/JS
-    publishPath: frontend
+    buildCommand: "" 
+    staticPublishPath: frontend
     headers:
       - path: /*
         name: Access-Control-Allow-Origin
